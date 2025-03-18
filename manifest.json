@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "AI Test Ease",
+  "version": "1.0",
+  "description": "Records user interactions and saves them to Google Sheets",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "identity",
+    "scripting",
+    "background"
+  ],
+  "oauth2": {
+    "client_id": "142180159372-4tltf1eevavn3btkgl7kmvnru3qrl7ll.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
+  },
+  "icons": {
+    "16": "images/icon16.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "images/icon16.png",
+      "48": "images/icon48.png",
+      "128": "images/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
