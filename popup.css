@@ -41,6 +41,7 @@ small {
   margin-bottom: 10px;
 }
 
+/* Default button styles */
 button {
   padding: 8px 12px;
   cursor: pointer;
@@ -49,17 +50,15 @@ button {
   border: none;
   border-radius: 4px;
   font-weight: bold;
-}
-
-button:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
+  transition: background-color 0.3s ease;
+  min-width: 120px;
 }
 
 button:hover:not(:disabled) {
   background-color: #3367d6;
 }
 
+/* Start recording button */
 #startRecording {
   background-color: #0f9d58;
 }
@@ -68,12 +67,48 @@ button:hover:not(:disabled) {
   background-color: #0b8043;
 }
 
+#startRecording.recording {
+  background-color: #0b8043;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Stop recording button */
 #stopRecording {
   background-color: #db4437;
 }
 
 #stopRecording:hover:not(:disabled) {
   background-color: #c53929;
+}
+
+/* Button disabled states - important to come AFTER the specific button styles */
+button:disabled {
+  background-color: #cccccc !important;
+  color: #888888 !important;
+  cursor: not-allowed !important;
+  opacity: 0.7 !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+  border: 1px solid #cccccc !important;
+}
+
+/* Special styling for disabled stop button */
+#stopRecording:disabled {
+  background-color: #f1a5a5 !important;
+  color: #888888 !important;
+  border: 1px solid #cccccc !important;
 }
 
 #status {
@@ -93,4 +128,21 @@ button:hover:not(:disabled) {
 #status.error {
   background-color: #fce8e6;
   color: #c53929;
+}
+
+#status a {
+  color: #4285f4;
+  text-decoration: none;
+  display: inline-block;
+  margin-top: 5px;
+  padding: 5px 10px;
+  border: 1px solid #4285f4;
+  border-radius: 4px;
+  transition: all 0.3s;
+  font-weight: bold;
+}
+
+#status a:hover {
+  background-color: #4285f4;
+  color: white;
 }

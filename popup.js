@@ -4,11 +4,39 @@ document.addEventListener("DOMContentLoaded", () => {
   const spreadsheetUrlInput = document.getElementById("spreadsheetUrl");
   const statusDiv = document.getElementById("status");
 
+  // Initial button states - ensure stop button is disabled on load
+  stopButton.disabled = true;
+  stopButton.classList.add("disabled-button");
+
+  // Function to set recording UI state
+  function setRecordingState(isRecording) {
+    if (isRecording) {
+      startButton.textContent = "Recording...";
+      startButton.disabled = true;
+      startButton.classList.add("recording");
+
+      // Make sure stop button is enabled
+      stopButton.disabled = false;
+      stopButton.classList.remove("disabled-button");
+
+      spreadsheetUrlInput.disabled = true;
+    } else {
+      startButton.textContent = "Start Recording";
+      startButton.disabled = false;
+      startButton.classList.remove("recording");
+
+      // Make sure stop button is disabled
+      stopButton.disabled = true;
+      stopButton.classList.add("disabled-button");
+
+      spreadsheetUrlInput.disabled = false;
+    }
+  }
+
   // Function to update status
   function updateStatus(message, isError = false) {
     statusDiv.textContent = message;
     statusDiv.className = isError ? "error" : "success";
-    console.log(`Status: ${message}`);
   }
 
   // Function to extract spreadsheet ID from URL
@@ -44,7 +72,6 @@ document.addEventListener("DOMContentLoaded", () => {
         target: { tabId },
         files: ["content.js"],
       });
-      console.log("Content script injected successfully");
       return true;
     } catch (error) {
       console.error("Failed to inject content script:", error);
@@ -60,7 +87,6 @@ document.addEventListener("DOMContentLoaded", () => {
         return response;
       } catch (error) {
         if (i === maxRetries) throw error;
-        console.log(`Retry ${i + 1}: Injecting content script...`);
         await injectContentScript(tabId);
         await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay before retry
       }
@@ -84,12 +110,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // Check current recording state when popup opens
   chrome.runtime.sendMessage({ action: "getRecordingState" }, (response) => {
     if (response && response.isRecording) {
-      startButton.disabled = true;
-      stopButton.disabled = false;
-      spreadsheetUrlInput.disabled = true;
+      setRecordingState(true);
       updateStatus("Recording in progress...");
+    } else {
+      setRecordingState(false);
     }
   });
+
+  // Force update the button states now
+  setRecordingState(false);
 
   startButton.addEventListener("click", async () => {
     try {
@@ -111,6 +140,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       updateStatus("Starting recording...");
 
+      // Update UI immediately to provide feedback - VERY IMPORTANT FOR USER EXPERIENCE
+      setRecordingState(true);
+
+      // Force enable the stop button
+      stopButton.disabled = false;
+      stopButton.classList.remove("disabled-button");
       // First, ensure content script is injected
       await injectContentScript(tab.id);
 
@@ -118,7 +153,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const contentResponse = await sendMessageWithRetry(tab.id, {
         action: "startRecording",
       });
-      console.log("Content script response:", contentResponse);
 
       if (!contentResponse || contentResponse.status !== "Recording started") {
         throw new Error("Failed to start recording in content script");
@@ -129,7 +163,6 @@ document.addEventListener("DOMContentLoaded", () => {
         action: "startRecording",
         spreadsheetId: spreadsheetId,
       });
-      console.log("Background script response:", bgResponse);
 
       if (!bgResponse || bgResponse.status !== "Recording started") {
         throw new Error(
@@ -137,17 +170,14 @@ document.addEventListener("DOMContentLoaded", () => {
         );
       }
 
-      startButton.disabled = true;
-      stopButton.disabled = false;
-      spreadsheetUrlInput.disabled = true;
+      // Double-check recording UI state is properly set
+      setRecordingState(true);
       updateStatus("Recording in progress...");
     } catch (error) {
       console.error("Start recording error:", error);
       updateStatus(`Error: ${error.message}`, true);
       // Reset buttons in case of error
-      startButton.disabled = false;
-      stopButton.disabled = true;
-      spreadsheetUrlInput.disabled = false;
+      setRecordingState(false);
     }
   });
 
@@ -167,7 +197,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const contentResponse = await sendMessageWithRetry(tab.id, {
         action: "stopRecording",
       });
-      console.log("Content script response:", contentResponse);
 
       if (!contentResponse || contentResponse.status !== "Recording stopped") {
         throw new Error("Failed to stop recording in content script");
@@ -177,7 +206,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const bgResponse = await sendMessageToBackground({
         action: "stopRecording",
       });
-      console.log("Background script response:", bgResponse);
 
       if (!bgResponse || bgResponse.status !== "Recording stopped") {
         throw new Error(
@@ -185,9 +213,8 @@ document.addEventListener("DOMContentLoaded", () => {
         );
       }
 
-      startButton.disabled = false;
-      stopButton.disabled = true;
-      spreadsheetUrlInput.disabled = false;
+      // Reset UI
+      setRecordingState(false);
 
       // Wait for the spreadsheet link
       const spreadsheetInfo = await sendMessageToBackground({
@@ -207,9 +234,7 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Stop recording error:", error);
       updateStatus(`Error: ${error.message}`, true);
       // Reset buttons in case of error
-      startButton.disabled = false;
-      stopButton.disabled = true;
-      spreadsheetUrlInput.disabled = false;
+      setRecordingState(false);
     }
   });
 });

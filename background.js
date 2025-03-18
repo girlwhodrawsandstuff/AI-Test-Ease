@@ -1,6 +1,3 @@
-// Immediately log when the script starts loading
-console.log("[Background] Script initialization started");
-
 // Add error handler for uncaught errors
 self.onerror = function (message, source, lineno, colno, error) {
   console.error("[Background] Uncaught error:", {
@@ -26,18 +23,8 @@ let recordingState = {
   targetSpreadsheetId: null, // Store spreadsheet ID from user input
 };
 
-// Log when the script is fully loaded
-console.log("[Background] Script fully loaded and ready");
-
 // Handle messages from content script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log(
-    "[Background] Received message:",
-    message,
-    "from sender:",
-    sender
-  );
-
   if (message.action === "startRecording") {
     // Get the current active tab if sender.tab is not available
     if (!sender.tab) {
@@ -49,15 +36,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // Store spreadsheet ID if provided
           if (message.spreadsheetId) {
             recordingState.targetSpreadsheetId = message.spreadsheetId;
-            console.log(
-              `[Background] Will use existing spreadsheet: ${message.spreadsheetId}`
-            );
           } else {
             recordingState.targetSpreadsheetId = null;
-            console.log("[Background] Will create a new spreadsheet");
           }
 
-          console.log("Recording started in background for tab:", tabs[0].id);
           sendResponse({ status: "Recording started" });
         } else {
           sendResponse({ status: "error", error: "No active tab found" });
@@ -72,29 +54,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Store spreadsheet ID if provided
     if (message.spreadsheetId) {
       recordingState.targetSpreadsheetId = message.spreadsheetId;
-      console.log(
-        `[Background] Will use existing spreadsheet: ${message.spreadsheetId}`
-      );
     } else {
       recordingState.targetSpreadsheetId = null;
-      console.log("[Background] Will create a new spreadsheet");
     }
 
-    console.log("Recording started in background for tab:", sender.tab.id);
     sendResponse({ status: "Recording started" });
   } else if (message.action === "stopRecording") {
     recordingState.isRecording = false;
     recordingState.tabId = null;
     // We keep the targetSpreadsheetId intact for the saveInteractions call
-    console.log("Recording stopped in background");
     sendResponse({ status: "Recording stopped" });
   } else if (message.action === "getRecordingState") {
     sendResponse(recordingState);
   } else if (message.action === "saveInteractions") {
-    console.log("~~~Saving interactions:", message.interactions);
     saveToGoogleSheets(message.interactions)
       .then(() => {
-        console.log("Interactions saved successfully");
         sendResponse({ status: "success", url: spreadsheetUrl });
       })
       .catch((error) => {
@@ -124,9 +98,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 async function getAccessToken() {
   try {
-    console.log(
-      "[Auth] Starting authentication process with client ID from manifest"
-    );
     const clientId =
       "142180159372-4tltf1eevavn3btkgl7kmvnru3qrl7ll.apps.googleusercontent.com";
 
@@ -134,7 +105,6 @@ async function getAccessToken() {
     // We need to wrap it in a Promise
     const getToken = (interactive) => {
       return new Promise((resolve, reject) => {
-        console.log(`[Auth] Requesting token (interactive: ${interactive})`);
         chrome.identity.getAuthToken(
           {
             interactive: interactive,
@@ -150,7 +120,6 @@ async function getAccessToken() {
               );
               reject(chrome.runtime.lastError);
             } else {
-              console.log("[Auth] Successfully obtained token");
               resolve(token);
             }
           }
@@ -168,7 +137,6 @@ async function getAccessToken() {
 
     // If no token, try with interactive prompt
     if (!token) {
-      console.log("[Auth] No token found, requesting interactive auth...");
       token = await getToken(true);
     }
 
@@ -177,16 +145,12 @@ async function getAccessToken() {
     }
 
     // Verify the token is valid by making a test request
-    console.log("[Auth] Verifying token validity");
     const testResponse = await fetch(
       "https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=" +
         token
     );
 
     if (!testResponse.ok) {
-      console.log(
-        "[Auth] Token validation failed, revoking and requesting new token..."
-      );
       // Revoke the current token
       await new Promise((resolve, reject) => {
         chrome.identity.removeCachedAuthToken({ token }, () => {
@@ -197,18 +161,15 @@ async function getAccessToken() {
             );
             reject(chrome.runtime.lastError);
           } else {
-            console.log("[Auth] Successfully revoked token");
             resolve();
           }
         });
       });
 
       // Get a new token
-      console.log("[Auth] Requesting new token after revocation");
       token = await getToken(true);
     }
 
-    console.log("[Auth] Got valid auth token successfully");
     return token;
   } catch (error) {
     console.error("[Auth] Error getting auth token:", error);
@@ -220,9 +181,6 @@ async function createSpreadsheet() {
   try {
     // Check if we should use an existing spreadsheet
     if (recordingState.targetSpreadsheetId) {
-      console.log(
-        `[Sheets] Using existing spreadsheet: ${recordingState.targetSpreadsheetId}`
-      );
       spreadsheetId = recordingState.targetSpreadsheetId;
       spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
 
@@ -231,13 +189,11 @@ async function createSpreadsheet() {
       return spreadsheetId;
     }
 
-    console.log("[Sheets] Starting spreadsheet creation process");
     const token = await getAccessToken();
     if (!token) {
       throw new Error("Failed to get auth token");
     }
 
-    console.log("[Sheets] Creating new spreadsheet with valid token");
     const response = await fetch(
       "https://sheets.googleapis.com/v4/spreadsheets",
       {
@@ -283,8 +239,6 @@ async function createSpreadsheet() {
 
       // If unauthorized, try to refresh the token
       if (response.status === 401) {
-        console.log("[Sheets] Token expired, refreshing...");
-
         // Revoke the current token
         await new Promise((resolve, reject) => {
           chrome.identity.removeCachedAuthToken({ token }, () => {
@@ -295,7 +249,6 @@ async function createSpreadsheet() {
               );
               reject(chrome.runtime.lastError);
             } else {
-              console.log("[Sheets] Successfully revoked token");
               resolve();
             }
           });
@@ -317,7 +270,6 @@ async function createSpreadsheet() {
                   );
                   reject(chrome.runtime.lastError);
                 } else {
-                  console.log("[Sheets] Successfully obtained new token");
                   resolve(token);
                 }
               }
@@ -326,7 +278,6 @@ async function createSpreadsheet() {
         };
 
         const newToken = await getToken(true);
-        console.log("[Sheets] Retrying spreadsheet creation with new token");
 
         // Retry with new token
         const retryResponse = await fetch(
@@ -371,10 +322,6 @@ async function createSpreadsheet() {
         const data = await retryResponse.json();
         spreadsheetId = data.spreadsheetId;
         spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
-        console.log(
-          "[Sheets] Spreadsheet created after token refresh:",
-          spreadsheetUrl
-        );
         return spreadsheetId;
       }
 
@@ -386,7 +333,6 @@ async function createSpreadsheet() {
     const data = await response.json();
     spreadsheetId = data.spreadsheetId;
     spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
-    console.log("[Sheets] Spreadsheet created successfully:", spreadsheetUrl);
     return spreadsheetId;
   } catch (error) {
     console.error("[Sheets] Error in createSpreadsheet:", error);
@@ -397,7 +343,6 @@ async function createSpreadsheet() {
 // New function to verify access to an existing spreadsheet
 async function verifySpreadsheetAccess(spreadsheetId) {
   try {
-    console.log(`[Sheets] Verifying access to spreadsheet: ${spreadsheetId}`);
     const token = await getAccessToken();
     if (!token) {
       throw new Error("Failed to get auth token");
@@ -426,9 +371,6 @@ async function verifySpreadsheetAccess(spreadsheetId) {
     }
 
     const data = await response.json();
-    console.log(
-      `[Sheets] Successfully accessed spreadsheet: "${data.properties.title}"`
-    );
     return true;
   } catch (error) {
     console.error("[Sheets] Error verifying spreadsheet access:", error);
@@ -437,8 +379,6 @@ async function verifySpreadsheetAccess(spreadsheetId) {
 }
 
 async function saveToGoogleSheets(interactions) {
-  console.log("Saving interactions:", interactions);
-
   if (!spreadsheetId) {
     await createSpreadsheet();
   }
@@ -536,8 +476,6 @@ async function saveToGoogleSheets(interactions) {
   if (!response.ok) {
     // If token is expired, try refreshing it
     if (response.status === 401) {
-      console.log("Token expired during data saving, refreshing...");
-
       // Revoke the current token
       await new Promise((resolve, reject) => {
         chrome.identity.removeCachedAuthToken({ token }, () => {
@@ -592,13 +530,10 @@ async function saveToGoogleSheets(interactions) {
         );
       }
 
-      console.log("Data saved to spreadsheet successfully after token refresh");
       return;
     }
 
     const error = await response.text();
     throw new Error(`Failed to save to spreadsheet: ${error}`);
   }
-
-  console.log("Data saved to spreadsheet successfully");
 }

@@ -9,24 +9,15 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     interactions: [],
   };
 
-  console.log("AI Test Ease content script initialized");
-
   // Listen for messages from popup/background
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log("Content script received message:", message);
-
     try {
       if (message.action === "startRecording") {
         window.aiTestEaseState.isRecording = true;
         window.aiTestEaseState.interactions = [];
-        console.log("Recording started");
         sendResponse({ status: "Recording started" });
       } else if (message.action === "stopRecording") {
         window.aiTestEaseState.isRecording = false;
-        console.log(
-          "Recording stopped, sending interactions:",
-          window.aiTestEaseState.interactions
-        );
         // Send recorded interactions to background script
         chrome.runtime.sendMessage(
           {
@@ -34,7 +25,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
             interactions: window.aiTestEaseState.interactions,
           },
           (response) => {
-            console.log("Save response:", response);
             sendResponse({ status: "Recording stopped" });
           }
         );
@@ -52,7 +42,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
 
     try {
       const target = event.target;
-      console.log("Click recorded on:", target);
 
       const interaction = {
         type: "click",
@@ -68,7 +57,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       };
 
       window.aiTestEaseState.interactions.push(interaction);
-      console.log("Interaction recorded:", interaction);
     } catch (error) {
       console.error("Error recording click:", error);
     }
@@ -86,7 +74,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
 
       try {
         const target = event.target;
-        console.log("Focus recorded on:", target);
 
         const interaction = {
           type: "focus",
@@ -102,7 +89,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         };
 
         window.aiTestEaseState.interactions.push(interaction);
-        console.log("Interaction recorded:", interaction);
       } catch (error) {
         console.error("Error recording focus:", error);
       }
