@@ -1,15 +1,40 @@
 document.addEventListener("DOMContentLoaded", () => {
   const startButton = document.getElementById("startRecording");
   const stopButton = document.getElementById("stopRecording");
-  const statusDiv = document.createElement("div");
-  statusDiv.id = "status";
-  document.body.appendChild(statusDiv);
+  const spreadsheetUrlInput = document.getElementById("spreadsheetUrl");
+  const statusDiv = document.getElementById("status");
 
   // Function to update status
   function updateStatus(message, isError = false) {
     statusDiv.textContent = message;
-    statusDiv.style.color = isError ? "red" : "green";
+    statusDiv.className = isError ? "error" : "success";
     console.log(`Status: ${message}`);
+  }
+
+  // Function to extract spreadsheet ID from URL
+  function extractSpreadsheetId(url) {
+    if (!url) return null;
+
+    try {
+      // For URLs like https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit
+      const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      return match ? match[1] : null;
+    } catch (error) {
+      console.error("Error extracting spreadsheet ID:", error);
+      return null;
+    }
+  }
+
+  // Function to validate spreadsheet URL
+  function validateSpreadsheetUrl(url) {
+    if (!url) return true; // Empty URL is valid (will create new sheet)
+
+    const id = extractSpreadsheetId(url);
+    if (!id) {
+      updateStatus("Invalid spreadsheet URL format", true);
+      return false;
+    }
+    return true;
   }
 
   // Function to inject content script
@@ -61,12 +86,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (response && response.isRecording) {
       startButton.disabled = true;
       stopButton.disabled = false;
+      spreadsheetUrlInput.disabled = true;
       updateStatus("Recording in progress...");
     }
   });
 
   startButton.addEventListener("click", async () => {
     try {
+      // Validate spreadsheet URL if provided
+      const spreadsheetUrl = spreadsheetUrlInput.value.trim();
+      if (!validateSpreadsheetUrl(spreadsheetUrl)) {
+        return;
+      }
+
+      const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
+
       const [tab] = await chrome.tabs.query({
         active: true,
         currentWindow: true,
@@ -93,6 +127,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // Finally, notify background script
       const bgResponse = await sendMessageToBackground({
         action: "startRecording",
+        spreadsheetId: spreadsheetId,
       });
       console.log("Background script response:", bgResponse);
 
@@ -104,6 +139,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       startButton.disabled = true;
       stopButton.disabled = false;
+      spreadsheetUrlInput.disabled = true;
       updateStatus("Recording in progress...");
     } catch (error) {
       console.error("Start recording error:", error);
@@ -111,6 +147,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // Reset buttons in case of error
       startButton.disabled = false;
       stopButton.disabled = true;
+      spreadsheetUrlInput.disabled = false;
     }
   });
 
@@ -150,6 +187,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       startButton.disabled = false;
       stopButton.disabled = true;
+      spreadsheetUrlInput.disabled = false;
 
       // Wait for the spreadsheet link
       const spreadsheetInfo = await sendMessageToBackground({
@@ -171,6 +209,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // Reset buttons in case of error
       startButton.disabled = false;
       stopButton.disabled = true;
+      spreadsheetUrlInput.disabled = false;
     }
   });
 });

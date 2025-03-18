@@ -23,6 +23,7 @@ let spreadsheetUrl = null;
 let recordingState = {
   isRecording: false,
   tabId: null,
+  targetSpreadsheetId: null, // Store spreadsheet ID from user input
 };
 
 // Log when the script is fully loaded
@@ -44,6 +45,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (tabs && tabs[0]) {
           recordingState.isRecording = true;
           recordingState.tabId = tabs[0].id;
+
+          // Store spreadsheet ID if provided
+          if (message.spreadsheetId) {
+            recordingState.targetSpreadsheetId = message.spreadsheetId;
+            console.log(
+              `[Background] Will use existing spreadsheet: ${message.spreadsheetId}`
+            );
+          } else {
+            recordingState.targetSpreadsheetId = null;
+            console.log("[Background] Will create a new spreadsheet");
+          }
+
           console.log("Recording started in background for tab:", tabs[0].id);
           sendResponse({ status: "Recording started" });
         } else {
@@ -55,11 +68,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     recordingState.isRecording = true;
     recordingState.tabId = sender.tab.id;
+
+    // Store spreadsheet ID if provided
+    if (message.spreadsheetId) {
+      recordingState.targetSpreadsheetId = message.spreadsheetId;
+      console.log(
+        `[Background] Will use existing spreadsheet: ${message.spreadsheetId}`
+      );
+    } else {
+      recordingState.targetSpreadsheetId = null;
+      console.log("[Background] Will create a new spreadsheet");
+    }
+
     console.log("Recording started in background for tab:", sender.tab.id);
     sendResponse({ status: "Recording started" });
   } else if (message.action === "stopRecording") {
     recordingState.isRecording = false;
     recordingState.tabId = null;
+    // We keep the targetSpreadsheetId intact for the saveInteractions call
     console.log("Recording stopped in background");
     sendResponse({ status: "Recording stopped" });
   } else if (message.action === "getRecordingState") {
@@ -192,6 +218,19 @@ async function getAccessToken() {
 
 async function createSpreadsheet() {
   try {
+    // Check if we should use an existing spreadsheet
+    if (recordingState.targetSpreadsheetId) {
+      console.log(
+        `[Sheets] Using existing spreadsheet: ${recordingState.targetSpreadsheetId}`
+      );
+      spreadsheetId = recordingState.targetSpreadsheetId;
+      spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
+
+      // Verify spreadsheet exists and is accessible
+      await verifySpreadsheetAccess(spreadsheetId);
+      return spreadsheetId;
+    }
+
     console.log("[Sheets] Starting spreadsheet creation process");
     const token = await getAccessToken();
     if (!token) {
@@ -355,6 +394,48 @@ async function createSpreadsheet() {
   }
 }
 
+// New function to verify access to an existing spreadsheet
+async function verifySpreadsheetAccess(spreadsheetId) {
+  try {
+    console.log(`[Sheets] Verifying access to spreadsheet: ${spreadsheetId}`);
+    const token = await getAccessToken();
+    if (!token) {
+      throw new Error("Failed to get auth token");
+    }
+
+    // Try to get spreadsheet metadata
+    const response = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=properties.title`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.error(
+        "[Sheets] Spreadsheet access failed:",
+        response.status,
+        responseText
+      );
+      throw new Error(`Cannot access spreadsheet: ${responseText}`);
+    }
+
+    const data = await response.json();
+    console.log(
+      `[Sheets] Successfully accessed spreadsheet: "${data.properties.title}"`
+    );
+    return true;
+  } catch (error) {
+    console.error("[Sheets] Error verifying spreadsheet access:", error);
+    throw error;
+  }
+}
+
 async function saveToGoogleSheets(interactions) {
   console.log("Saving interactions:", interactions);
 
@@ -371,6 +452,9 @@ async function saveToGoogleSheets(interactions) {
     throw new Error("Failed to get auth token");
   }
 
+  // Check if we need to add headers (only for new spreadsheets)
+  let needsHeaders = !recordingState.targetSpreadsheetId;
+
   // Prepare the data
   const headers = [
     "Timestamp",
@@ -382,6 +466,7 @@ async function saveToGoogleSheets(interactions) {
     "Element Text",
     "XPath",
   ];
+
   const rows = interactions.map((interaction) => [
     interaction.timestamp,
     interaction.type,
@@ -393,11 +478,49 @@ async function saveToGoogleSheets(interactions) {
     interaction.element.xpath,
   ]);
 
-  // Add headers if this is the first write
-  const values = [headers, ...rows];
+  // Add headers if this is a new spreadsheet
+  const values = needsHeaders ? [headers, ...rows] : rows;
+
+  // Determine where to append data
+  let range = needsHeaders ? "Interactions!A1" : "Interactions!A:H";
+
+  // If using an existing spreadsheet, find the next empty row
+  if (recordingState.targetSpreadsheetId) {
+    try {
+      const nextRowResponse = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Interactions!A:A?majorDimension=COLUMNS`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (nextRowResponse.ok) {
+        const data = await nextRowResponse.json();
+        // If there's data, get the length (number of rows), otherwise start at row 1
+        let nextRow =
+          data.values && data.values[0] ? data.values[0].length + 1 : 1;
+
+        // If we're starting from row 1, we need to add headers
+        if (nextRow === 1) {
+          needsHeaders = true;
+          values.unshift(headers);
+        }
+
+        range = `Interactions!A${nextRow}`;
+      }
+    } catch (error) {
+      console.error("[Sheets] Error finding next empty row:", error);
+      // Fall back to appending
+      range = "Interactions!A:H";
+    }
+  }
 
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Interactions!A1:H${values.length}:append?valueInputOption=RAW`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW`,
     {
       method: "POST",
       headers: {
@@ -449,7 +572,7 @@ async function saveToGoogleSheets(interactions) {
 
       // Retry with new token
       const retryResponse = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Interactions!A1:H${values.length}:append?valueInputOption=RAW`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW`,
         {
           method: "POST",
           headers: {

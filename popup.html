@@ -5,8 +5,24 @@
   </head>
   <body>
     <h1>User Interaction Recorder</h1>
-    <button id="startRecording">Start Recording</button>
-    <button id="stopRecording" disabled>Stop Recording</button>
+
+    <div class="form-group">
+      <label for="spreadsheetUrl">Existing Spreadsheet URL (optional):</label>
+      <input
+        type="text"
+        id="spreadsheetUrl"
+        placeholder="https://docs.google.com/spreadsheets/d/..."
+      />
+      <small>Leave blank to create a new spreadsheet</small>
+    </div>
+
+    <div class="button-group">
+      <button id="startRecording">Start Recording</button>
+      <button id="stopRecording" disabled>Stop Recording</button>
+    </div>
+
+    <div id="status"></div>
+
     <script src="popup.js"></script>
   </body>
 </html>
