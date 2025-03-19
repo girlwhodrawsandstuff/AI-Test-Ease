@@ -146,3 +146,38 @@ button:disabled {
   background-color: #4285f4;
   color: white;
 }
+
+.ai-config {
+  margin-bottom: 15px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 10px;
+  background-color: #f9f9f9;
+}
+
+.ai-toggle {
+  margin-bottom: 10px;
+}
+
+.ai-toggle label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.ai-toggle input[type="checkbox"] {
+  margin-right: 8px;
+}
+
+.hidden {
+  display: none;
+}
+
+select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  background-color: white;
+}
