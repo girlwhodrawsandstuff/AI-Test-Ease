@@ -829,7 +829,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
     const firstSheetId = spreadsheetData.sheets[0].properties.sheetId;
     console.log("[Sheets] Using sheet ID:", firstSheetId);
 
-    // Add bold formatting to the header row
+    // Add enhanced formatting to the header row
     const response = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
       {
@@ -840,6 +840,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
         },
         body: JSON.stringify({
           requests: [
+            // Format header cells with updated styling
             {
               repeatCell: {
                 range: {
@@ -851,19 +852,175 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 },
                 cell: {
                   userEnteredFormat: {
+                    backgroundColor: {
+                      red: 0.82,
+                      green: 0.88,
+                      blue: 0.98, // Light cornflower blue 2
+                    },
                     textFormat: {
                       bold: true,
+                      foregroundColor: {
+                        red: 0.0,
+                        green: 0.0,
+                        blue: 0.0, // Black text
+                      },
+                      fontSize: 11, // Slightly larger font
                     },
-                    backgroundColor: {
-                      red: 0.9,
-                      green: 0.9,
-                      blue: 0.9,
+                    horizontalAlignment: "CENTER", // Center align text
+                    verticalAlignment: "MIDDLE", // Middle align vertically
+                    padding: {
+                      top: 5,
+                      right: 5,
+                      bottom: 5,
+                      left: 5,
                     },
                   },
                 },
-                fields: "userEnteredFormat(textFormat,backgroundColor)",
+                fields:
+                  "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,padding)",
               },
             },
+            // Enable text wrapping for all cells
+            {
+              repeatCell: {
+                range: {
+                  sheetId: firstSheetId,
+                  startRowIndex: 0,
+                  startColumnIndex: 0,
+                  endColumnIndex: 8, // All columns
+                },
+                cell: {
+                  userEnteredFormat: {
+                    wrapStrategy: "WRAP", // Enable text wrapping
+                  },
+                },
+                fields: "userEnteredFormat.wrapStrategy",
+              },
+            },
+            // Format priority column with color coding - P1 (high priority)
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1, // Start after header row
+                      startColumnIndex: 7, // Priority column (H)
+                      endColumnIndex: 8,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "P1",
+                        },
+                      ],
+                    },
+                    format: {
+                      textFormat: {
+                        foregroundColor: {
+                          red: 0.8,
+                          green: 0.0,
+                          blue: 0.0, // Dark red text
+                        },
+                        bold: true,
+                      },
+                      backgroundColor: {
+                        red: 1.0,
+                        green: 0.9,
+                        blue: 0.9, // Very light red background
+                      },
+                    },
+                  },
+                },
+                index: 0,
+              },
+            },
+            // P2 (medium priority) formatting
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1,
+                      startColumnIndex: 7,
+                      endColumnIndex: 8,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "P2",
+                        },
+                      ],
+                    },
+                    format: {
+                      textFormat: {
+                        foregroundColor: {
+                          red: 0.85,
+                          green: 0.5,
+                          blue: 0.0, // Orange text
+                        },
+                        bold: true,
+                      },
+                      backgroundColor: {
+                        red: 1.0,
+                        green: 0.95,
+                        blue: 0.8, // Very light orange background
+                      },
+                    },
+                  },
+                },
+                index: 1,
+              },
+            },
+            // P3 (low priority) formatting
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1,
+                      startColumnIndex: 7,
+                      endColumnIndex: 8,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "P3",
+                        },
+                      ],
+                    },
+                    format: {
+                      textFormat: {
+                        foregroundColor: {
+                          red: 0.85,
+                          green: 0.7,
+                          blue: 0.0, // Amber/yellow text
+                        },
+                        bold: true,
+                      },
+                      backgroundColor: {
+                        red: 1.0,
+                        green: 1.0,
+                        blue: 0.8, // Very light yellow background
+                      },
+                    },
+                  },
+                },
+                index: 2,
+              },
+            },
+            // Freeze the header row
             {
               updateSheetProperties: {
                 properties: {
@@ -873,6 +1030,17 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   },
                 },
                 fields: "gridProperties.frozenRowCount",
+              },
+            },
+            // Auto-resize columns to fit content
+            {
+              autoResizeDimensions: {
+                dimensions: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 0,
+                  endIndex: 8,
+                },
               },
             },
           ],
@@ -885,7 +1053,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
       throw new Error(`Failed to format spreadsheet: ${error}`);
     }
 
-    console.log("Spreadsheet headers formatted successfully");
+    console.log("Spreadsheet formatted successfully with updated styling");
   } catch (error) {
     console.error("[Sheets] Error formatting spreadsheet:", error);
     // Don't rethrow the error - treat formatting errors as non-fatal
