@@ -620,19 +620,48 @@ async function saveToGoogleSheets(interactions) {
       "Priority",
     ];
 
-    const rows = enhancedInteractions.map((interaction) => [
-      "", // Module/Feature (empty for now)
-      testCaseName, // Test Case Description
-      interaction.aiActionDescription || "", // Test Steps
+    // Condense all interactions into a single test case row
+
+    // Combine all steps into a numbered list
+    const testSteps = enhancedInteractions
+      .map(
+        (interaction, index) =>
+          `${index + 1}. ${
+            interaction.aiActionDescription || interaction.type + " on element"
+          }`
+      )
+      .join("\n");
+
+    // Combine all expected results
+    const expectedResults = enhancedInteractions
+      .map(
+        (interaction) =>
+          interaction.aiExpectedResult || "Action should complete successfully"
+      )
+      .join("\n");
+
+    // Get highest priority (P1 is highest, then P2, then P3)
+    const priorities = enhancedInteractions
+      .map((interaction) => interaction.aiPriority || "P3")
+      .sort();
+    const highestPriority = priorities.length > 0 ? priorities[0] : "P1";
+
+    // Create a single consolidated row
+    const consolidatedRow = [
+      testCaseName, // Module/Feature now contains test case name
+      `End-to-end test for ${testCaseName}`, // More descriptive test case description
+      testSteps, // All steps combined with numbering
       "", // Test Data (empty for now)
-      interaction.aiExpectedResult || "", // Expected Result
-      interaction.aiActualResult || "", // Actual Result
+      expectedResults, // All expected results combined
+      "", // Actual Result (empty, to be filled during test execution)
       "", // Severity (empty for now)
-      interaction.aiPriority || "P1", // Priority from AI or default P1
-    ]);
+      highestPriority, // Use highest priority found
+    ];
 
     // Add headers if this is a new spreadsheet
-    const values = needsHeaders ? [headers, ...rows] : rows;
+    const values = needsHeaders
+      ? [headers, consolidatedRow]
+      : [consolidatedRow];
 
     // Determine where to append data
     let range = needsHeaders ? "Interactions!A1" : "Interactions!A:H";
@@ -660,7 +689,7 @@ async function saveToGoogleSheets(interactions) {
           // If we're starting from row 1, we need to add headers
           if (nextRow === 1) {
             needsHeaders = true;
-            values.unshift(headers);
+            values[0] = headers;
           }
 
           range = `Interactions!A${nextRow}`;
@@ -696,8 +725,8 @@ async function saveToGoogleSheets(interactions) {
               const uniqueTestCaseId = `TC${String(Date.now()).substr(
                 -6
               )}_${Math.floor(Math.random() * 1000)}`;
-              // Update all rows with the new ID
-              rows.forEach((row) => (row[0] = uniqueTestCaseId));
+              // Update the consolidated row with the new ID
+              consolidatedRow[0] = uniqueTestCaseId;
             }
           }
         }
@@ -897,30 +926,6 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 fields: "userEnteredFormat.wrapStrategy",
               },
             },
-            // Add dropdown for priority column (column H - index 7)
-            {
-              setDataValidation: {
-                range: {
-                  sheetId: firstSheetId,
-                  startRowIndex: 1, // Start after header
-                  endRowIndex: 1000, // Apply to many rows
-                  startColumnIndex: 7, // Priority column (H)
-                  endColumnIndex: 8,
-                },
-                rule: {
-                  condition: {
-                    type: "ONE_OF_LIST",
-                    values: [
-                      { userEnteredValue: "P1" },
-                      { userEnteredValue: "P2" },
-                      { userEnteredValue: "P3" },
-                    ],
-                  },
-                  showCustomUi: true,
-                  strict: false,
-                },
-              },
-            },
             // Format priority column with color coding - P1 (high priority)
             {
               addConditionalFormatRule: {
@@ -1077,9 +1082,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
       throw new Error(`Failed to format spreadsheet: ${error}`);
     }
 
-    console.log(
-      "Spreadsheet formatted successfully with dropdown options and styling"
-    );
+    console.log("Spreadsheet formatted successfully with updated styling");
   } catch (error) {
     console.error("[Sheets] Error formatting spreadsheet:", error);
     // Don't rethrow the error - treat formatting errors as non-fatal
