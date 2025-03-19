@@ -1,4 +1,3 @@
-// Add error handler for uncaught errors
 self.onerror = function (message, source, lineno, colno, error) {
   console.error("[Background] Uncaught error:", {
     message,
@@ -10,7 +9,6 @@ self.onerror = function (message, source, lineno, colno, error) {
   return false;
 };
 
-// Add error handler for unhandled promise rejections
 self.onunhandledrejection = function (event) {
   console.error("[Background] Unhandled promise rejection:", event.reason);
 };
@@ -20,37 +18,31 @@ let spreadsheetUrl = null;
 let recordingState = {
   isRecording: false,
   tabId: null,
-  targetSpreadsheetId: null, // Store spreadsheet ID from user input
+  targetSpreadsheetId: null,
   testerName: "",
 };
 
-// Configuration for AI integration
 const AI_CONFIG = {
-  enabled: true, // AI processing is enabled by default
-  backendUrl: "http://localhost:5000", // Fixed URL to the backend service
+  enabled: true,
+  backendUrl: "http://localhost:5000",
 };
 
-// Handle messages from content script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "startRecording") {
-    // Clear any previously stored interactions when starting a new recording
     chrome.storage.local.set({ interactions: [] });
 
-    // Get the current active tab if sender.tab is not available
     if (!sender.tab) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs && tabs[0]) {
           recordingState.isRecording = true;
           recordingState.tabId = tabs[0].id;
 
-          // Store spreadsheet ID if provided
           if (message.spreadsheetId) {
             recordingState.targetSpreadsheetId = message.spreadsheetId;
           } else {
             recordingState.targetSpreadsheetId = null;
           }
 
-          // Store tester name if provided
           if (message.testerName) {
             recordingState.testerName = message.testerName;
           }
@@ -60,20 +52,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ status: "error", error: "No active tab found" });
         }
       });
-      return true; // Will respond asynchronously
+      return true;
     }
 
     recordingState.isRecording = true;
     recordingState.tabId = sender.tab.id;
 
-    // Store spreadsheet ID if provided
     if (message.spreadsheetId) {
       recordingState.targetSpreadsheetId = message.spreadsheetId;
     } else {
       recordingState.targetSpreadsheetId = null;
     }
 
-    // Store tester name if provided
     if (message.testerName) {
       recordingState.testerName = message.testerName;
     }
@@ -82,24 +72,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === "stopRecording") {
     recordingState.isRecording = false;
     recordingState.tabId = null;
-    // We keep the targetSpreadsheetId intact for the saveInteractions call
     sendResponse({ status: "Recording stopped" });
   } else if (message.action === "getRecordingState") {
     sendResponse(recordingState);
   } else if (message.action === "saveInteractions") {
-    // Get all interactions from storage
     chrome.storage.local.get(["interactions"], (result) => {
       const allInteractions = result.interactions || [];
 
-      // If new interactions provided, save them to our final list
       if (message.interactions && message.interactions.length > 0) {
-        // Add them to storage first
         chrome.storage.local.set(
           {
             interactions: [...allInteractions, ...message.interactions],
           },
           () => {
-            // Then get the updated list for saving
             chrome.storage.local.get(["interactions"], (updatedResult) => {
               const finalInteractions = updatedResult.interactions || [];
               console.log("Saving all interactions:", finalInteractions.length);
@@ -107,7 +92,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               saveToGoogleSheets(finalInteractions)
                 .then(() => {
                   sendResponse({ status: "success", url: spreadsheetUrl });
-                  // Clear interactions after successful save
                   chrome.storage.local.remove("interactions");
                 })
                 .catch((error) => {
@@ -118,7 +102,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         );
       } else {
-        // No new interactions, use what's in storage
         console.log(
           "No new interactions, using stored interactions:",
           allInteractions.length
@@ -126,7 +109,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         saveToGoogleSheets(allInteractions)
           .then(() => {
             sendResponse({ status: "success", url: spreadsheetUrl });
-            // Clear interactions after successful save
             chrome.storage.local.remove("interactions");
           })
           .catch((error) => {
@@ -135,11 +117,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
       }
     });
-    return true; // Will respond asynchronously
+    return true;
   } else if (message.action === "getSpreadsheetInfo") {
     sendResponse({ url: spreadsheetUrl });
   } else if (message.action === "storeInteractions") {
-    // Store interactions in chrome.storage.local
     chrome.storage.local.get(["interactions"], (result) => {
       const existingInteractions = result.interactions || [];
       const newInteractions = [
@@ -154,20 +135,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ status: "success" });
       });
     });
-    return true; // Will respond asynchronously
+    return true;
   } else if (message.action === "getStoredInteractions") {
-    // Retrieve stored interactions
     chrome.storage.local.get(["interactions"], (result) => {
       sendResponse({ interactions: result.interactions || [] });
     });
-    return true; // Will respond asynchronously
+    return true;
   }
 });
 
-// Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (recordingState.isRecording && recordingState.tabId === tabId) {
-    // If the tab is being updated and we're recording, ensure content script is injected
     chrome.scripting
       .executeScript({
         target: { tabId },
@@ -184,16 +162,12 @@ async function getAccessToken() {
     const clientId =
       "142180159372-4tltf1eevavn3btkgl7kmvnru3qrl7ll.apps.googleusercontent.com";
 
-    // chrome.identity.getAuthToken returns the token via callback, not directly
-    // We need to wrap it in a Promise
     const getToken = (interactive) => {
       return new Promise((resolve, reject) => {
         chrome.identity.getAuthToken(
           {
             interactive: interactive,
             scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-            // The client_id is already specified in the manifest.json and doesn't need to be
-            // explicitly provided here, but logging for verification
           },
           (token) => {
             if (chrome.runtime.lastError) {
@@ -210,7 +184,6 @@ async function getAccessToken() {
       });
     };
 
-    // First try to get token without interactive prompt
     let token;
     try {
       token = await getToken(false);
@@ -218,7 +191,6 @@ async function getAccessToken() {
       console.log("[Auth] Failed to get non-interactive token:", e);
     }
 
-    // If no token, try with interactive prompt
     if (!token) {
       token = await getToken(true);
     }
@@ -227,14 +199,12 @@ async function getAccessToken() {
       throw new Error("Failed to get auth token");
     }
 
-    // Verify the token is valid by making a test request
     const testResponse = await fetch(
       "https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=" +
         token
     );
 
     if (!testResponse.ok) {
-      // Revoke the current token
       await new Promise((resolve, reject) => {
         chrome.identity.removeCachedAuthToken({ token }, () => {
           if (chrome.runtime.lastError) {
@@ -249,7 +219,6 @@ async function getAccessToken() {
         });
       });
 
-      // Get a new token
       token = await getToken(true);
     }
 
@@ -262,7 +231,6 @@ async function getAccessToken() {
 
 async function createSpreadsheet() {
   try {
-    // Check if we should use an existing spreadsheet
     if (recordingState.targetSpreadsheetId) {
       console.log(
         `[Sheets] Using existing spreadsheet: ${recordingState.targetSpreadsheetId}`
@@ -270,7 +238,6 @@ async function createSpreadsheet() {
       spreadsheetId = recordingState.targetSpreadsheetId;
       spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
 
-      // Verify spreadsheet exists and is accessible
       const token = await getAccessToken();
       if (!token) {
         throw new Error("Failed to get auth token");
@@ -278,7 +245,6 @@ async function createSpreadsheet() {
 
       await verifySpreadsheetAccess(spreadsheetId, token);
 
-      // Don't try to format an existing spreadsheet - it likely already has headers
       return spreadsheetId;
     }
 
@@ -307,7 +273,7 @@ async function createSpreadsheet() {
                 title: "Interactions",
                 gridProperties: {
                   frozenRowCount: 1,
-                  columnCount: 9, // Updated for new column structure
+                  columnCount: 9,
                 },
               },
             },
@@ -331,13 +297,11 @@ async function createSpreadsheet() {
         errorData
       );
 
-      // If token is expired, refresh it and try again
       if (errorStatus === 401) {
         console.log(
           "[Sheets] Token expired during spreadsheet creation, refreshing..."
         );
 
-        // Revoke the current token
         await new Promise((resolve, reject) => {
           chrome.identity.removeCachedAuthToken({ token }, () => {
             if (chrome.runtime.lastError) {
@@ -352,7 +316,6 @@ async function createSpreadsheet() {
           });
         });
 
-        // Get a new token with the getToken Promise wrapper
         const getToken = (interactive) => {
           return new Promise((resolve, reject) => {
             chrome.identity.getAuthToken(
@@ -379,7 +342,6 @@ async function createSpreadsheet() {
         const newToken = await getToken(true);
         console.log("[Sheets] Retrying spreadsheet creation with new token");
 
-        // Retry with new token
         const retryResponse = await fetch(
           "https://sheets.googleapis.com/v4/spreadsheets",
           {
@@ -398,7 +360,7 @@ async function createSpreadsheet() {
                     title: "Interactions",
                     gridProperties: {
                       frozenRowCount: 1,
-                      columnCount: 9, // Updated for new column structure
+                      columnCount: 9,
                     },
                   },
                 },
@@ -407,7 +369,6 @@ async function createSpreadsheet() {
           }
         );
 
-        // Check retry response
         if (!retryResponse.ok) {
           const retryError = await retryResponse.text();
           console.error(
@@ -440,13 +401,10 @@ async function createSpreadsheet() {
     spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
     console.log("[Sheets] Spreadsheet created successfully:", spreadsheetUrl);
 
-    // Format the spreadsheet headers for new spreadsheets only
     try {
-      // Add bold formatting to the header row
       await formatSpreadsheet(spreadsheetId, token);
     } catch (error) {
       console.error("[Sheets] Error formatting spreadsheet:", error);
-      // Non-fatal error, we can continue
     }
 
     return spreadsheetId;
@@ -456,7 +414,6 @@ async function createSpreadsheet() {
   }
 }
 
-// New function to verify access to an existing spreadsheet
 async function verifySpreadsheetAccess(spreadsheetId, token) {
   try {
     if (!token) {
@@ -466,7 +423,6 @@ async function verifySpreadsheetAccess(spreadsheetId, token) {
       }
     }
 
-    // Try to get spreadsheet metadata
     const response = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=properties.title`,
       {
@@ -500,7 +456,6 @@ async function verifySpreadsheetAccess(spreadsheetId, token) {
   }
 }
 
-// Function to analyze interactions with AI and generate descriptions and test cases
 async function processInteractionsWithAI(interactions) {
   if (!AI_CONFIG.enabled) {
     console.log("[AI] AI processing is disabled");
@@ -510,7 +465,6 @@ async function processInteractionsWithAI(interactions) {
     };
   }
 
-  // Validate that interactions array is valid before proceeding
   if (
     !interactions ||
     !Array.isArray(interactions) ||
@@ -523,23 +477,17 @@ async function processInteractionsWithAI(interactions) {
     };
   }
 
-  // Ensure all interactions have element property to prevent errors
   const cleanedInteractions = interactions.map((interaction) => {
-    // Make a copy to avoid modifying the original
     const cleanInteraction = { ...interaction };
 
-    // Ensure url property exists
     if (!cleanInteraction.url) {
-      // For navigation interactions, use toUrl if available
       if (cleanInteraction.type === "navigation" && cleanInteraction.toUrl) {
         cleanInteraction.url = cleanInteraction.toUrl;
       } else {
-        // Fallback to a default value
         cleanInteraction.url = "about:blank";
       }
     }
 
-    // Ensure element exists with required properties
     if (!cleanInteraction.element) {
       cleanInteraction.element = {
         tagName: interaction.type === "navigation" ? "PAGE" : "UNKNOWN",
@@ -547,18 +495,15 @@ async function processInteractionsWithAI(interactions) {
         type: interaction.type,
       };
     } else {
-      // Ensure element has tagName property
       if (!cleanInteraction.element.tagName) {
         cleanInteraction.element.tagName =
           interaction.type === "navigation" ? "PAGE" : "UNKNOWN";
       }
 
-      // Ensure xpath exists
       if (!cleanInteraction.element.xpath) {
         cleanInteraction.element.xpath = "/html/body";
       }
 
-      // Ensure type exists
       if (!cleanInteraction.element.type) {
         cleanInteraction.element.type = interaction.type;
       }
@@ -571,16 +516,13 @@ async function processInteractionsWithAI(interactions) {
     console.log("[AI] Starting AI analysis of interactions");
     console.log("[AI] Using backend URL:", AI_CONFIG.backendUrl);
 
-    // Add timeout to prevent hanging on connection issues
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
       console.error("[AI] Request timed out after 20 seconds");
     }, 20000);
 
-    // Call our backend service with timeout
     try {
-      // Log the payload we're sending to help debug
       console.log(
         "[AI] Sending interactions to backend:",
         JSON.stringify({
@@ -605,14 +547,12 @@ async function processInteractionsWithAI(interactions) {
         signal: controller.signal,
       });
 
-      // Clear the timeout since we got a response
       clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorData = await response.text();
         console.error("[AI] Backend API error:", errorData);
 
-        // Check specifically for the "No interactions provided" error
         if (errorData.includes("No interactions provided")) {
           console.warn(
             "[AI] Backend reported no interactions, using fallback processing"
@@ -639,7 +579,6 @@ async function processInteractionsWithAI(interactions) {
 
       console.log("[AI] AI analysis complete:", aiResponse);
 
-      // Enhance the original interactions with AI-generated content
       const enhancedInteractions = cleanedInteractions.map(
         (interaction, index) => {
           if (index < aiResponse.interactions.length) {
@@ -660,7 +599,6 @@ async function processInteractionsWithAI(interactions) {
         testCaseName: aiResponse.testCaseName,
       };
     } catch (fetchError) {
-      // Clear timeout if fetch failed
       clearTimeout(timeoutId);
 
       if (fetchError.name === "AbortError") {
@@ -675,9 +613,7 @@ async function processInteractionsWithAI(interactions) {
   } catch (error) {
     console.error("[AI] Error processing interactions with AI:", error);
 
-    // Create basic fallback data
     const fallbackInteractions = cleanedInteractions.map((interaction) => {
-      // Ensure element has all required properties
       const element = interaction.element || {};
       const tagName =
         element.tagName ||
@@ -685,7 +621,6 @@ async function processInteractionsWithAI(interactions) {
 
       let actionDesc = `${interaction.type} on ${tagName}`;
 
-      // Add more context if available
       if (element.innerText) {
         actionDesc += ` with text "${element.innerText.substring(0, 30)}"`;
       } else if (element.id) {
@@ -704,7 +639,6 @@ async function processInteractionsWithAI(interactions) {
       };
     });
 
-    // Create a test name based on URL if possible
     let testName = "User Interaction Test";
     if (cleanedInteractions.length > 0) {
       if (cleanedInteractions[0].url) {
@@ -712,20 +646,16 @@ async function processInteractionsWithAI(interactions) {
           const url = new URL(cleanedInteractions[0].url);
           testName = `Interaction Test on ${url.hostname}`;
         } catch (e) {
-          // Use a default based on the URL if parsing fails
           testName = `Interaction Test on ${cleanedInteractions[0].url.substring(
             0,
             30
           )}`;
         }
       } else if (cleanedInteractions[0].toUrl) {
-        // Try toUrl as fallback if url doesn't exist
         try {
           const url = new URL(cleanedInteractions[0].toUrl);
           testName = `Interaction Test on ${url.hostname}`;
-        } catch (e) {
-          // Use default test name
-        }
+        } catch (e) {}
       }
     }
 
@@ -736,7 +666,6 @@ async function processInteractionsWithAI(interactions) {
   }
 }
 
-// Update in chrome.storage when AI settings change - only track aiEnabled
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === "sync") {
     if (changes.aiEnabled) {
@@ -745,17 +674,14 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
 });
 
-// Initialize AI settings from storage - only get aiEnabled
 chrome.storage.sync.get(["aiEnabled"], (result) => {
   if (result.aiEnabled !== undefined) AI_CONFIG.enabled = result.aiEnabled;
 });
 
-// Modify the saveToGoogleSheets function to use AI
 async function saveToGoogleSheets(interactions) {
   console.log("Saving interactions:", interactions);
 
   try {
-    // Validate that interactions exist and are non-empty
     if (
       !interactions ||
       !Array.isArray(interactions) ||
@@ -767,14 +693,12 @@ async function saveToGoogleSheets(interactions) {
       );
     }
 
-    // Process interactions with AI if enabled
     const processedData = await processInteractionsWithAI(interactions);
     const enhancedInteractions = processedData.interactions;
     const testCaseName = processedData.testCaseName;
 
     console.log("[Sheets] Using test case name:", testCaseName);
 
-    // Get access token first - we'll need it throughout the function
     const token = await getAccessToken();
     if (!token) {
       throw new Error("Failed to get auth token");
@@ -788,13 +712,10 @@ async function saveToGoogleSheets(interactions) {
       throw new Error("Failed to create or get spreadsheet");
     }
 
-    // Check if we need to add headers (only for new spreadsheets)
     let needsHeaders = !recordingState.targetSpreadsheetId;
 
-    // Generate a unique Test Case ID for this recording session
     const testCaseId = `TC${String(Date.now()).substr(-6)}`;
 
-    // Prepare the data with the new format
     const headers = [
       "Module/Feature",
       "Test Case Description",
@@ -807,7 +728,6 @@ async function saveToGoogleSheets(interactions) {
       "Status",
     ];
 
-    // Combine all steps into a numbered list
     const testSteps = enhancedInteractions
       .map(
         (interaction, index) =>
@@ -817,7 +737,6 @@ async function saveToGoogleSheets(interactions) {
       )
       .join("\n");
 
-    // Combine all expected results
     const expectedResults = enhancedInteractions
       .map(
         (interaction) =>
@@ -825,13 +744,11 @@ async function saveToGoogleSheets(interactions) {
       )
       .join("\n");
 
-    // Get highest priority (P1 is highest, then P2, then P3)
     const priorities = enhancedInteractions
       .map((interaction) => interaction.aiPriority || "P3")
       .sort();
     const highestPriority = priorities.length > 0 ? priorities[0] : "P1";
 
-    // Format tester name with proper capitalization
     const formatTesterName = (name) => {
       if (!name) return "";
       return name
@@ -842,7 +759,6 @@ async function saveToGoogleSheets(interactions) {
         .join(" ");
     };
 
-    // Create a single consolidated row
     const consolidatedRow = [
       testCaseName,
       `${testCaseName}`,
@@ -852,27 +768,15 @@ async function saveToGoogleSheets(interactions) {
       expectedResults,
       highestPriority,
       formatTesterName(recordingState.testerName),
-      "Pass", // Status (default to Pass)
+      "Pass",
     ];
 
-    // Add comments explaining each field
-    // consolidatedRow[0] = Module/Feature (test case name)
-    // consolidatedRow[1] = Test Case Description
-    // consolidatedRow[2] = Test Steps (all steps combined with numbering)
-    // consolidatedRow[3] = Test Data (empty for now)
-    // consolidatedRow[4] = Expected Result (empty for manual filling)
-    // consolidatedRow[5] = Actual Result (filled with AI-generated expected results)
-    // consolidatedRow[6] = Priority (highest priority found)
-
-    // Add headers if this is a new spreadsheet
     const values = needsHeaders
       ? [headers, consolidatedRow]
       : [consolidatedRow];
 
-    // Determine where to append data
     let range = needsHeaders ? "Interactions!A1" : "Interactions!A:I";
 
-    // If using an existing spreadsheet, find the next empty row
     if (recordingState.targetSpreadsheetId) {
       try {
         const nextRowResponse = await fetch(
@@ -888,11 +792,9 @@ async function saveToGoogleSheets(interactions) {
 
         if (nextRowResponse.ok) {
           const data = await nextRowResponse.json();
-          // If there's data, get the length (number of rows), otherwise start at row 1
           let nextRow =
             data.values && data.values[0] ? data.values[0].length + 1 : 1;
 
-          // If we're starting from row 1, we need to add headers
           if (nextRow === 1) {
             needsHeaders = true;
             values[0] = headers;
@@ -902,15 +804,12 @@ async function saveToGoogleSheets(interactions) {
         }
       } catch (error) {
         console.error("[Sheets] Error finding next empty row:", error);
-        // Fall back to appending
         range = "Interactions!A:I";
       }
     }
 
-    // Handle existing test case IDs to ensure uniqueness
     if (recordingState.targetSpreadsheetId) {
       try {
-        // Check for existing test case IDs
         const testCaseResponse = await fetch(
           `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Interactions!A:A?majorDimension=COLUMNS`,
           {
@@ -925,13 +824,10 @@ async function saveToGoogleSheets(interactions) {
         if (testCaseResponse.ok) {
           const data = await testCaseResponse.json();
           if (data.values && data.values[0]) {
-            // If our testCaseId already exists, generate a new one
             if (data.values[0].includes(testCaseId)) {
-              // Generate a truly unique one by adding a random suffix
               const uniqueTestCaseId = `TC${String(Date.now()).substr(
                 -6
               )}_${Math.floor(Math.random() * 1000)}`;
-              // Update the consolidated row with the new ID
               consolidatedRow[0] = uniqueTestCaseId;
             }
           }
@@ -956,11 +852,9 @@ async function saveToGoogleSheets(interactions) {
     );
 
     if (!response.ok) {
-      // If token is expired, try refreshing it
       if (response.status === 401) {
         console.log("Token expired during data saving, refreshing...");
 
-        // Revoke the current token
         await new Promise((resolve, reject) => {
           chrome.identity.removeCachedAuthToken({ token }, () => {
             if (chrome.runtime.lastError) {
@@ -971,7 +865,6 @@ async function saveToGoogleSheets(interactions) {
           });
         });
 
-        // Get a new token with the getToken Promise wrapper
         const getToken = (interactive) => {
           return new Promise((resolve, reject) => {
             chrome.identity.getAuthToken(
@@ -992,7 +885,6 @@ async function saveToGoogleSheets(interactions) {
 
         const newToken = await getToken(true);
 
-        // Retry with new token
         const retryResponse = await fetch(
           `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW`,
           {
@@ -1031,11 +923,9 @@ async function saveToGoogleSheets(interactions) {
   }
 }
 
-// Function to format spreadsheet headers and styling
 async function formatSpreadsheet(spreadsheetId, token) {
   console.log("Formatting spreadsheet headers:", spreadsheetId);
   try {
-    // First, get the spreadsheet to find the actual first sheet ID
     const getResponse = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`,
       {
@@ -1050,13 +940,11 @@ async function formatSpreadsheet(spreadsheetId, token) {
     if (!getResponse.ok) {
       const getError = await getResponse.text();
       console.error("[Sheets] Error getting spreadsheet info:", getError);
-      // Continue without formatting rather than failing completely
       return;
     }
 
     const spreadsheetData = await getResponse.json();
 
-    // Check if we have sheets and get the first sheet's ID
     if (!spreadsheetData.sheets || spreadsheetData.sheets.length === 0) {
       console.error("[Sheets] No sheets found in the spreadsheet");
       return;
@@ -1065,7 +953,6 @@ async function formatSpreadsheet(spreadsheetId, token) {
     const firstSheetId = spreadsheetData.sheets[0].properties.sheetId;
     console.log("[Sheets] Using sheet ID:", firstSheetId);
 
-    // Add enhanced formatting to the header row
     const response = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
       {
@@ -1076,7 +963,6 @@ async function formatSpreadsheet(spreadsheetId, token) {
         },
         body: JSON.stringify({
           requests: [
-            // Format header cells with updated styling
             {
               repeatCell: {
                 range: {
@@ -1084,26 +970,26 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   startRowIndex: 0,
                   endRowIndex: 1,
                   startColumnIndex: 0,
-                  endColumnIndex: 9, // 9 columns (A-I)
+                  endColumnIndex: 9,
                 },
                 cell: {
                   userEnteredFormat: {
                     backgroundColor: {
                       red: 0.82,
                       green: 0.88,
-                      blue: 0.98, // Light cornflower blue 2
+                      blue: 0.98,
                     },
                     textFormat: {
                       bold: true,
                       foregroundColor: {
                         red: 0.0,
                         green: 0.0,
-                        blue: 0.0, // Black text
+                        blue: 0.0,
                       },
-                      fontSize: 11, // Slightly larger font
+                      fontSize: 11,
                     },
-                    horizontalAlignment: "CENTER", // Center align text
-                    verticalAlignment: "MIDDLE", // Middle align vertically
+                    horizontalAlignment: "CENTER",
+                    verticalAlignment: "MIDDLE",
                     padding: {
                       top: 5,
                       right: 5,
@@ -1116,32 +1002,31 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,padding)",
               },
             },
-            // Enable text wrapping for all cells
+
             {
               repeatCell: {
                 range: {
                   sheetId: firstSheetId,
                   startRowIndex: 0,
                   startColumnIndex: 0,
-                  endColumnIndex: 9, // All columns
+                  endColumnIndex: 9,
                 },
                 cell: {
                   userEnteredFormat: {
-                    wrapStrategy: "WRAP", // Enable text wrapping
+                    wrapStrategy: "WRAP",
                   },
                 },
                 fields: "userEnteredFormat.wrapStrategy",
               },
             },
-            // Format priority column with color coding - P1 (high priority)
             {
               addConditionalFormatRule: {
                 rule: {
                   ranges: [
                     {
                       sheetId: firstSheetId,
-                      startRowIndex: 1, // Start after header row
-                      startColumnIndex: 6, // Priority column (G)
+                      startRowIndex: 1,
+                      startColumnIndex: 6,
                       endColumnIndex: 7,
                     },
                   ],
@@ -1159,14 +1044,14 @@ async function formatSpreadsheet(spreadsheetId, token) {
                         foregroundColor: {
                           red: 0.8,
                           green: 0.0,
-                          blue: 0.0, // Dark red text
+                          blue: 0.0,
                         },
                         bold: true,
                       },
                       backgroundColor: {
                         red: 1.0,
                         green: 0.9,
-                        blue: 0.9, // Very light red background
+                        blue: 0.9,
                       },
                     },
                   },
@@ -1174,7 +1059,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 index: 0,
               },
             },
-            // P2 (medium priority) formatting
+
             {
               addConditionalFormatRule: {
                 rule: {
@@ -1200,14 +1085,14 @@ async function formatSpreadsheet(spreadsheetId, token) {
                         foregroundColor: {
                           red: 0.85,
                           green: 0.5,
-                          blue: 0.0, // Orange text
+                          blue: 0.0,
                         },
                         bold: true,
                       },
                       backgroundColor: {
                         red: 1.0,
                         green: 0.95,
-                        blue: 0.8, // Very light orange background
+                        blue: 0.8,
                       },
                     },
                   },
@@ -1215,7 +1100,6 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 index: 1,
               },
             },
-            // P3 (low priority) formatting
             {
               addConditionalFormatRule: {
                 rule: {
@@ -1241,14 +1125,14 @@ async function formatSpreadsheet(spreadsheetId, token) {
                         foregroundColor: {
                           red: 0.85,
                           green: 0.7,
-                          blue: 0.0, // Amber/yellow text
+                          blue: 0.0,
                         },
                         bold: true,
                       },
                       backgroundColor: {
                         red: 1.0,
                         green: 1.0,
-                        blue: 0.8, // Very light yellow background
+                        blue: 0.8,
                       },
                     },
                   },
@@ -1256,7 +1140,6 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 index: 2,
               },
             },
-            // Freeze the header row
             {
               updateSheetProperties: {
                 properties: {
@@ -1268,7 +1151,6 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 fields: "gridProperties.frozenRowCount",
               },
             },
-            // Auto-resize columns to fit content
             {
               autoResizeDimensions: {
                 dimensions: {
@@ -1279,13 +1161,12 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 },
               },
             },
-            // Make Test Case Description column (column B) wider
             {
               updateDimensionProperties: {
                 range: {
                   sheetId: firstSheetId,
                   dimension: "COLUMNS",
-                  startIndex: 1, // Column B (Test Case Description)
+                  startIndex: 1,
                   endIndex: 2,
                 },
                 properties: {
@@ -1294,13 +1175,12 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 fields: "pixelSize",
               },
             },
-            // Make Test Steps column (column C) wider
             {
               updateDimensionProperties: {
                 range: {
                   sheetId: firstSheetId,
                   dimension: "COLUMNS",
-                  startIndex: 2, // Column C (Test Steps)
+                  startIndex: 2,
                   endIndex: 3,
                 },
                 properties: {
@@ -1309,13 +1189,12 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 fields: "pixelSize",
               },
             },
-            // Make Expected Result column (column E) wider
             {
               updateDimensionProperties: {
                 range: {
                   sheetId: firstSheetId,
                   dimension: "COLUMNS",
-                  startIndex: 4, // Column E (Expected Result)
+                  startIndex: 4,
                   endIndex: 5,
                 },
                 properties: {
@@ -1324,13 +1203,12 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 fields: "pixelSize",
               },
             },
-            // Add dropdown validation for Status column (column I)
             {
               setDataValidation: {
                 range: {
                   sheetId: firstSheetId,
-                  startRowIndex: 1, // Skip header row
-                  startColumnIndex: 8, // Column I (Status)
+                  startRowIndex: 1,
+                  startColumnIndex: 8,
                   endColumnIndex: 9,
                 },
                 rule: {
@@ -1346,15 +1224,14 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 },
               },
             },
-            // Format Pass status with green background
             {
               addConditionalFormatRule: {
                 rule: {
                   ranges: [
                     {
                       sheetId: firstSheetId,
-                      startRowIndex: 1, // Start after header row
-                      startColumnIndex: 8, // Status column (I)
+                      startRowIndex: 1,
+                      startColumnIndex: 8,
                       endColumnIndex: 9,
                     },
                   ],
@@ -1387,15 +1264,14 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 index: 3,
               },
             },
-            // Format Fail status with red background
             {
               addConditionalFormatRule: {
                 rule: {
                   ranges: [
                     {
                       sheetId: firstSheetId,
-                      startRowIndex: 1, // Start after header row
-                      startColumnIndex: 8, // Status column (I)
+                      startRowIndex: 1,
+                      startColumnIndex: 8,
                       endColumnIndex: 9,
                     },
                   ],
@@ -1441,6 +1317,5 @@ async function formatSpreadsheet(spreadsheetId, token) {
     console.log("Spreadsheet formatted successfully with updated styling");
   } catch (error) {
     console.error("[Sheets] Error formatting spreadsheet:", error);
-    // Don't rethrow the error - treat formatting errors as non-fatal
   }
 }
