@@ -223,7 +223,7 @@ async function createSpreadsheet() {
                 title: "Interactions",
                 gridProperties: {
                   frozenRowCount: 1,
-                  columnCount: 7, // Updated for new column structure (7 columns now)
+                  columnCount: 8, // Updated for new column structure (8 columns now)
                 },
               },
             },
@@ -315,7 +315,7 @@ async function createSpreadsheet() {
                     title: "Interactions",
                     gridProperties: {
                       frozenRowCount: 1,
-                      columnCount: 7, // Updated for new column structure
+                      columnCount: 8, // Updated for new column structure
                     },
                   },
                 },
@@ -360,55 +360,7 @@ async function createSpreadsheet() {
     // Format the spreadsheet headers
     try {
       // Add bold formatting to the header row
-      await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            requests: [
-              {
-                repeatCell: {
-                  range: {
-                    sheetId: 0,
-                    startRowIndex: 0,
-                    endRowIndex: 1,
-                    startColumnIndex: 0,
-                    endColumnIndex: 7, // Updated to 7 columns
-                  },
-                  cell: {
-                    userEnteredFormat: {
-                      textFormat: {
-                        bold: true,
-                      },
-                      backgroundColor: {
-                        red: 0.9,
-                        green: 0.9,
-                        blue: 0.9,
-                      },
-                    },
-                  },
-                  fields: "userEnteredFormat(textFormat,backgroundColor)",
-                },
-              },
-              {
-                updateSheetProperties: {
-                  properties: {
-                    sheetId: 0,
-                    gridProperties: {
-                      frozenRowCount: 1,
-                    },
-                  },
-                  fields: "gridProperties.frozenRowCount",
-                },
-              },
-            ],
-          }),
-        }
-      );
+      await formatSpreadsheet(spreadsheetId, token);
     } catch (error) {
       console.error("[Sheets] Error formatting spreadsheet:", error);
       // Non-fatal error, we can continue
@@ -565,30 +517,32 @@ async function saveToGoogleSheets(interactions) {
 
   // Prepare the data with the new format
   const headers = [
-    "Test_Case_ID",
-    "Test_Case_Name",
-    "Step_Number",
-    "Action_Description",
-    "Expected_Result",
+    "Module/Feature",
+    "Test Case Description",
+    "Test Steps",
+    "Test Data",
+    "Expected Result",
+    "Actual Result",
+    "Severity",
     "Priority",
-    "URL",
   ];
 
-  const rows = enhancedInteractions.map((interaction, index) => [
-    testCaseId, // Test_Case_ID (same for all steps in this recording)
-    testCaseName, // Test_Case_Name from AI or default
-    index + 1, // Step_Number (increments for each interaction)
-    interaction.aiActionDescription || "", // Action_Description from AI
-    interaction.aiExpectedResult || "", // Expected_Result from AI
+  const rows = enhancedInteractions.map((interaction) => [
+    "", // Module/Feature (empty for now)
+    testCaseName, // Test Case Description
+    interaction.aiActionDescription || "", // Test Steps
+    "", // Test Data (empty for now)
+    interaction.aiExpectedResult || "", // Expected Result
+    interaction.aiActualResult || "", // Actual Result
+    "", // Severity (empty for now)
     interaction.aiPriority || "P1", // Priority from AI or default P1
-    interaction.url, // URL
   ]);
 
   // Add headers if this is a new spreadsheet
   const values = needsHeaders ? [headers, ...rows] : rows;
 
   // Determine where to append data
-  let range = needsHeaders ? "Interactions!A1" : "Interactions!A:G";
+  let range = needsHeaders ? "Interactions!A1" : "Interactions!A:H";
 
   // If using an existing spreadsheet, find the next empty row
   if (recordingState.targetSpreadsheetId) {
@@ -621,7 +575,7 @@ async function saveToGoogleSheets(interactions) {
     } catch (error) {
       console.error("[Sheets] Error finding next empty row:", error);
       // Fall back to appending
-      range = "Interactions!A:G";
+      range = "Interactions!A:H";
     }
   }
 
@@ -741,4 +695,70 @@ async function saveToGoogleSheets(interactions) {
   }
 
   console.log("Data saved to spreadsheet successfully");
+}
+
+async function formatSpreadsheet(spreadsheetId, token) {
+  console.log("Formatting spreadsheet headers:", spreadsheetId);
+  try {
+    // Add bold formatting to the header row
+    const response = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          requests: [
+            {
+              repeatCell: {
+                range: {
+                  sheetId: 0,
+                  startRowIndex: 0,
+                  endRowIndex: 1,
+                  startColumnIndex: 0,
+                  endColumnIndex: 8, // 8 columns (A-H)
+                },
+                cell: {
+                  userEnteredFormat: {
+                    textFormat: {
+                      bold: true,
+                    },
+                    backgroundColor: {
+                      red: 0.9,
+                      green: 0.9,
+                      blue: 0.9,
+                    },
+                  },
+                },
+                fields: "userEnteredFormat(textFormat,backgroundColor)",
+              },
+            },
+            {
+              updateSheetProperties: {
+                properties: {
+                  sheetId: 0,
+                  gridProperties: {
+                    frozenRowCount: 1,
+                  },
+                },
+                fields: "gridProperties.frozenRowCount",
+              },
+            },
+          ],
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to format spreadsheet: ${error}`);
+    }
+
+    console.log("Spreadsheet headers formatted successfully");
+  } catch (error) {
+    console.error("[Sheets] Error formatting spreadsheet:", error);
+    throw error;
+  }
 }
