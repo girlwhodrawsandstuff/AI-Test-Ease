@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiEnabledCheckbox = document.getElementById("aiEnabled");
   const aiSettingsDiv = document.getElementById("aiSettings");
   const backendUrlInput = document.getElementById("backendUrl");
+  const testerNameInput = document.getElementById("testerName");
 
   // Explicit debugging of initial element states
   console.log("Initial DOM elements:", {
@@ -42,6 +43,13 @@ document.addEventListener("DOMContentLoaded", () => {
     aiSettingsDiv.classList.toggle("hidden", !isEnabled);
   });
 
+  // Load saved tester name
+  chrome.storage.sync.get(["testerName"], (result) => {
+    if (result.testerName) {
+      testerNameInput.value = result.testerName;
+    }
+  });
+
   // Toggle AI settings visibility when checkbox changes
   aiEnabledCheckbox.addEventListener("change", () => {
     const isEnabled = aiEnabledCheckbox.checked;
@@ -54,6 +62,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // Save backend URL when it changes
   backendUrlInput.addEventListener("change", () => {
     chrome.storage.sync.set({ backendUrl: backendUrlInput.value });
+  });
+
+  // Save tester name when it changes
+  testerNameInput.addEventListener("change", () => {
+    chrome.storage.sync.set({ testerName: testerNameInput.value });
   });
 
   // Function to set recording UI state
@@ -74,6 +87,7 @@ document.addEventListener("DOMContentLoaded", () => {
       spreadsheetUrlInput.disabled = true;
       aiEnabledCheckbox.disabled = true;
       backendUrlInput.disabled = true;
+      testerNameInput.disabled = true;
     } else {
       startButton.textContent = "Start Recording";
       startButton.disabled = false;
@@ -90,6 +104,7 @@ document.addEventListener("DOMContentLoaded", () => {
       spreadsheetUrlInput.disabled = false;
       aiEnabledCheckbox.disabled = false;
       backendUrlInput.disabled = false;
+      testerNameInput.disabled = false;
     }
   }
 
@@ -223,6 +238,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const bgResponse = await sendMessageToBackground({
         action: "startRecording",
         spreadsheetId: spreadsheetId,
+        testerName: testerNameInput.value,
       });
 
       if (!bgResponse || bgResponse.status !== "Recording started") {

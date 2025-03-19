@@ -21,6 +21,7 @@ let recordingState = {
   isRecording: false,
   tabId: null,
   targetSpreadsheetId: null, // Store spreadsheet ID from user input
+  testerName: "",
 };
 
 // Configuration for AI integration
@@ -46,6 +47,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             recordingState.targetSpreadsheetId = null;
           }
 
+          // Store tester name if provided
+          if (message.testerName) {
+            recordingState.testerName = message.testerName;
+          }
+
           sendResponse({ status: "Recording started" });
         } else {
           sendResponse({ status: "error", error: "No active tab found" });
@@ -62,6 +68,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       recordingState.targetSpreadsheetId = message.spreadsheetId;
     } else {
       recordingState.targetSpreadsheetId = null;
+    }
+
+    // Store tester name if provided
+    if (message.testerName) {
+      recordingState.testerName = message.testerName;
     }
 
     sendResponse({ status: "Recording started" });
@@ -695,6 +706,17 @@ async function saveToGoogleSheets(interactions) {
       .sort();
     const highestPriority = priorities.length > 0 ? priorities[0] : "P1";
 
+    // Format tester name with proper capitalization
+    const formatTesterName = (name) => {
+      if (!name) return "";
+      return name
+        .split(" ")
+        .map(
+          (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        )
+        .join(" ");
+    };
+
     // Create a single consolidated row
     const consolidatedRow = [
       testCaseName,
@@ -704,7 +726,7 @@ async function saveToGoogleSheets(interactions) {
       "",
       expectedResults,
       highestPriority,
-      "", // Tester (empty for user to fill)
+      formatTesterName(recordingState.testerName),
       "Pass", // Status (default to Pass)
     ];
 
