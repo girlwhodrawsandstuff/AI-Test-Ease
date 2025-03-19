@@ -228,13 +228,145 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     return { headers, rows };
   }
 
+  function handleInput(event) {
+    try {
+      const target = event.target;
+
+      // Only record input/textarea/select changes
+      if (!["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+
+      const inputId = target.id || target.name || getXPath(target);
+      const value = target.value;
+
+      // For password fields, don't record the actual value
+      const isPassword = target.type === "password";
+      const displayValue = isPassword ? "********" : value;
+
+      // Get a descriptive name for the field - with special handling for mobile/phone fields
+      let fieldName = getElementDescription(target);
+
+      // Check if this is a mobile number field and adjust field name
+      const isMobileField =
+        target.placeholder?.toLowerCase().includes("mobile") ||
+        target.placeholder?.toLowerCase().includes("phone") ||
+        target.id?.toLowerCase().includes("mobile") ||
+        target.id?.toLowerCase().includes("phone") ||
+        target.name?.toLowerCase().includes("mobile") ||
+        target.name?.toLowerCase().includes("phone") ||
+        target.type === "tel";
+
+      if (isMobileField) {
+        fieldName = "Mobile Number field";
+      }
+
+      // Remove "the " prefix for cleaner descriptions
+      fieldName = fieldName.replace("the ", "");
+
+      // Store the input value in state to reference it when animation frame fires
+      if (!window.aiTestEaseState.inputValues) {
+        window.aiTestEaseState.inputValues = {};
+      }
+      window.aiTestEaseState.inputValues[inputId] = displayValue;
+
+      // Store the field name for later reference
+      if (!window.aiTestEaseState.inputFields) {
+        window.aiTestEaseState.inputFields = {};
+      }
+      window.aiTestEaseState.inputFields[inputId] = {
+        fieldName: fieldName,
+        isMobileField: isMobileField,
+        type: target.type || "",
+        placeholder: target.placeholder || "",
+        tagName: target.tagName,
+        xpath: getXPath(target),
+      };
+
+      // Cancel any pending animation frame for this input
+      if (
+        window.aiTestEaseState.inputFrames &&
+        window.aiTestEaseState.inputFrames[inputId]
+      ) {
+        cancelAnimationFrame(window.aiTestEaseState.inputFrames[inputId]);
+      }
+
+      // Initialize inputFrames if it doesn't exist
+      if (!window.aiTestEaseState.inputFrames) {
+        window.aiTestEaseState.inputFrames = {};
+      }
+
+      // Queue a new frame to process input when browser is ready to render
+      window.aiTestEaseState.inputFrames[inputId] = requestAnimationFrame(
+        () => {
+          // Add a small delay to ensure we're capturing after typing stops
+          window.aiTestEaseState.inputFrames[inputId] = requestAnimationFrame(
+            () => {
+              // Create the interaction object for the final input value
+              const interaction = {
+                type: "input",
+                timestamp: new Date().toISOString(),
+                element: {
+                  tagName: target.tagName,
+                  id: target.id,
+                  className: target.className,
+                  placeholder: target.placeholder,
+                  name: target.name || "",
+                  type: target.type || "",
+                  xpath: getXPath(target),
+                  isMobileField: isMobileField,
+                },
+                inputValue: displayValue,
+                url: window.location.href,
+                pageTitle: document.title,
+                description: `Enter ${
+                  isPassword ? "password" : `"${displayValue}"`
+                } in ${fieldName}`,
+                expectedResult: "Input should be accepted",
+              };
+
+              // Remove any previous interaction for this input element from the interactions array
+              window.aiTestEaseState.interactions =
+                window.aiTestEaseState.interactions.filter((item) => {
+                  if (item.type !== "input") return true;
+
+                  const itemInputId =
+                    item.element.id || item.element.name || item.element.xpath;
+                  return itemInputId !== inputId;
+                });
+
+              // Add the final interaction to the list
+              window.aiTestEaseState.interactions.push(interaction);
+              console.log("Input finalized:", interaction.description);
+
+              // Store the interaction in chrome.storage.local
+              chrome.runtime.sendMessage(
+                { action: "storeInteractions", interactions: [interaction] },
+                (response) => {
+                  if (!response || response.status !== "success") {
+                    console.error("Failed to store finalized input:", response);
+                  }
+                }
+              );
+
+              delete window.aiTestEaseState.inputFrames[inputId];
+            }
+          );
+        }
+      );
+    } catch (error) {
+      console.error("Error recording input:", error);
+    }
+  }
+
   function startRecording() {
     console.log("Starting recording - attaching event listeners");
     window.aiTestEaseState.isRecording = true;
     window.aiTestEaseState.lastUrl = window.location.href;
+    window.aiTestEaseState.inputFrames = {};
+    window.aiTestEaseState.inputValues = {};
 
     document.addEventListener("click", handleClick);
     document.addEventListener("focus", handleFocus, true);
+    document.addEventListener("input", handleInput);
 
     const observer = new MutationObserver(() => {
       checkForNavigation();
@@ -251,6 +383,7 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     window.aiTestEaseState.eventHandlers = {
       click: handleClick,
       focus: handleFocus,
+      input: handleInput,
       observer: observer,
       navigationInterval: navigationInterval,
     };
@@ -259,6 +392,14 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
   function stopRecording() {
     console.log("Stopping recording - removing event listeners");
     window.aiTestEaseState.isRecording = false;
+
+    if (window.aiTestEaseState.inputFrames) {
+      Object.values(window.aiTestEaseState.inputFrames).forEach((frameId) => {
+        if (frameId) cancelAnimationFrame(frameId);
+      });
+    }
+    window.aiTestEaseState.inputFrames = {};
+    window.aiTestEaseState.inputValues = {};
 
     if (window.aiTestEaseState.eventHandlers.click) {
       document.removeEventListener(
@@ -272,6 +413,13 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         "focus",
         window.aiTestEaseState.eventHandlers.focus,
         true
+      );
+    }
+
+    if (window.aiTestEaseState.eventHandlers.input) {
+      document.removeEventListener(
+        "input",
+        window.aiTestEaseState.eventHandlers.input
       );
     }
 
@@ -314,6 +462,44 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       sendResponse({ status: "error", error: error.message });
     }
   });
+
+  function getElementDescription(element) {
+    if (!element) return "unknown element";
+
+    // Check for the best identifier in order of preference
+    if (element.placeholder) return element.placeholder;
+    if (element.name) return element.name;
+    if (element.id) return element.id;
+    if (element.ariaLabel || element.getAttribute("aria-label"))
+      return element.ariaLabel || element.getAttribute("aria-label");
+
+    // For selects, try to get the selected option text
+    if (
+      element.tagName === "SELECT" &&
+      element.options &&
+      element.selectedIndex >= 0
+    ) {
+      return `the ${element.options[element.selectedIndex].text} dropdown`;
+    }
+
+    // For labels, try to find associated label
+    const labels = document.querySelectorAll(`label[for="${element.id}"]`);
+    if (labels.length > 0) {
+      return labels[0].textContent.trim();
+    }
+
+    // Try finding a parent label
+    let parent = element.parentElement;
+    while (parent && parent.tagName !== "BODY") {
+      if (parent.tagName === "LABEL") {
+        return parent.textContent.trim();
+      }
+      parent = parent.parentElement;
+    }
+
+    // Default to generic description
+    return `the ${element.tagName.toLowerCase()} field`;
+  }
 
   function getXPath(element) {
     if (!element) return "";

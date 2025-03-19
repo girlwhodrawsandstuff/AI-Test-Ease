@@ -596,74 +596,55 @@ async function processInteractionsWithAI(interactions) {
 
       return {
         interactions: enhancedInteractions,
-        testCaseName: aiResponse.testCaseName,
+        testCaseName:
+          aiResponse.testCaseName ||
+          aiResponse.title ||
+          "User Interaction Test",
       };
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-
-      if (fetchError.name === "AbortError") {
-        console.error("[AI] Request aborted due to timeout");
-        throw new Error(
-          "Backend request timed out. Please check if the server is running."
-        );
+    } catch (error) {
+      if (error.name === "AbortError") {
+        console.error("[AI] Request timed out or was aborted");
+      } else {
+        console.error("[AI] Error processing interactions:", error);
       }
 
-      throw fetchError;
+      return fallbackProcessing(cleanedInteractions);
     }
   } catch (error) {
-    console.error("[AI] Error processing interactions with AI:", error);
-
-    const fallbackInteractions = cleanedInteractions.map((interaction) => {
-      const element = interaction.element || {};
-      const tagName =
-        element.tagName ||
-        (interaction.type === "navigation" ? "PAGE" : "UNKNOWN");
-
-      let actionDesc = `${interaction.type} on ${tagName}`;
-
-      if (element.innerText) {
-        actionDesc += ` with text "${element.innerText.substring(0, 30)}"`;
-      } else if (element.id) {
-        actionDesc += ` with id "${element.id}"`;
-      } else if (element.className) {
-        actionDesc += ` with class "${element.className}"`;
-      }
-
-      return {
-        ...interaction,
-        aiActionDescription: interaction.description || actionDesc,
-        aiExpectedResult:
-          interaction.expectedResult ||
-          "The action should complete successfully",
-        aiPriority: "P1",
-      };
-    });
-
-    let testName = "User Interaction Test";
-    if (cleanedInteractions.length > 0) {
-      if (cleanedInteractions[0].url) {
-        try {
-          const url = new URL(cleanedInteractions[0].url);
-          testName = `Interaction Test on ${url.hostname}`;
-        } catch (e) {
-          testName = `Interaction Test on ${cleanedInteractions[0].url.substring(
-            0,
-            30
-          )}`;
-        }
-      } else if (cleanedInteractions[0].toUrl) {
-        try {
-          const url = new URL(cleanedInteractions[0].toUrl);
-          testName = `Interaction Test on ${url.hostname}`;
-        } catch (e) {}
-      }
-    }
-
-    return {
-      interactions: fallbackInteractions,
-      testCaseName: testName,
-    };
+    console.error("[AI] Error in processInteractionsWithAI:", error);
+    return fallbackProcessing(cleanedInteractions);
   }
+}
+
+function fallbackProcessing(interactions) {
+  console.log("[AI] Using fallback processing for interactions");
+
+  let testCaseName = "User Interaction Test";
+  const firstNavigation = interactions.find(
+    (interaction) => interaction.type === "navigation"
+  );
+
+  if (firstNavigation && firstNavigation.pageTitle) {
+    testCaseName = `Test for ${firstNavigation.pageTitle}`;
+  } else if (firstNavigation && firstNavigation.url) {
+    try {
+      const url = new URL(firstNavigation.url);
+      testCaseName = `Test for ${url.hostname}`;
+    } catch (e) {
+      testCaseName = `Test for ${firstNavigation.url.substring(0, 30)}`;
+    }
+  }
+
+  return {
+    interactions: interactions.map((interaction) => ({
+      ...interaction,
+      aiActionDescription: interaction.description || `${interaction.type}`,
+      aiExpectedResult:
+        interaction.expectedResult || "Action should complete successfully",
+      aiPriority: "P2",
+    })),
+    testCaseName,
+  };
 }
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
@@ -677,6 +658,72 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 chrome.storage.sync.get(["aiEnabled"], (result) => {
   if (result.aiEnabled !== undefined) AI_CONFIG.enabled = result.aiEnabled;
 });
+
+function getTestCaseName(interactions) {
+  if (!interactions || interactions.length === 0) {
+    return "Untitled Test Case";
+  }
+
+  // Get the title of the first page
+  let firstPageTitle =
+    interactions[0]?.pageTitle ||
+    interactions[0]?.element?.tagName ||
+    "Unknown Page";
+
+  // Clean up the page title - remove any domain information if present
+  firstPageTitle = firstPageTitle.replace(/^https?:\/\/[^\/]+\//, "");
+  firstPageTitle = firstPageTitle.replace(/\.[^.]+$/, "");
+
+  // If it's a navigation, try to get a better name from the URL
+  if (interactions[0]?.type === "navigation" && interactions[0]?.toUrl) {
+    try {
+      const url = new URL(interactions[0].toUrl);
+      if (url.pathname !== "/" && url.pathname.length > 1) {
+        const pathSegments = url.pathname.split("/").filter(Boolean);
+        if (pathSegments.length > 0) {
+          const lastSegment = pathSegments[pathSegments.length - 1];
+          // Clean up the segment - replace hyphens with spaces and capitalize
+          firstPageTitle = lastSegment
+            .replace(/[-_]/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+        }
+      }
+    } catch (e) {
+      console.log("Error parsing URL for test case name:", e);
+    }
+  }
+
+  // Look for significant interactions - try to find form submissions or button clicks
+  const significantActions = interactions.filter(
+    (i) =>
+      i.type === "click" &&
+      (i.element?.tagName === "BUTTON" ||
+        i.element?.type === "submit" ||
+        i.description?.toLowerCase().includes("submit") ||
+        i.description?.toLowerCase().includes("login") ||
+        i.description?.toLowerCase().includes("sign in"))
+  );
+
+  let actionName = "";
+  if (significantActions.length > 0) {
+    // Use the most relevant action text we can find
+    actionName =
+      significantActions[0].element?.innerText ||
+      significantActions[0].description?.replace(/^Click on /i, "") ||
+      "Action";
+
+    // Clean up the action name - keep only the first few words
+    const actionWords = actionName.split(" ").slice(0, 3).join(" ");
+    actionName = actionWords || "Action";
+  }
+
+  // Put it all together - create a descriptive name
+  if (actionName) {
+    return `${firstPageTitle} - ${actionName}`;
+  } else {
+    return `${firstPageTitle} Test`;
+  }
+}
 
 async function saveToGoogleSheets(interactions) {
   console.log("Saving interactions:", interactions);
@@ -693,9 +740,9 @@ async function saveToGoogleSheets(interactions) {
       );
     }
 
-    const processedData = await processInteractionsWithAI(interactions);
-    const enhancedInteractions = processedData.interactions;
-    const testCaseName = processedData.testCaseName;
+    const enhancedInteractions = processInteractions(interactions);
+
+    const testCaseName = getTestCaseName(enhancedInteractions);
 
     console.log("[Sheets] Using test case name:", testCaseName);
 
@@ -714,8 +761,6 @@ async function saveToGoogleSheets(interactions) {
 
     let needsHeaders = !recordingState.targetSpreadsheetId;
 
-    const testCaseId = `TC${String(Date.now()).substr(-6)}`;
-
     const headers = [
       "Module/Feature",
       "Test Case Description",
@@ -729,25 +774,16 @@ async function saveToGoogleSheets(interactions) {
     ];
 
     const testSteps = enhancedInteractions
-      .map(
-        (interaction, index) =>
-          `${index + 1}. ${
-            interaction.aiActionDescription || interaction.type + " on element"
-          }`
-      )
+      .map((interaction, index) => formatTestStep(interaction, index + 1))
+      .filter((step) => step)
       .join("\n");
 
     const expectedResults = enhancedInteractions
       .map(
         (interaction) =>
-          interaction.aiExpectedResult || "Action should complete successfully"
+          interaction.expectedResult || "Action should complete successfully"
       )
       .join("\n");
-
-    const priorities = enhancedInteractions
-      .map((interaction) => interaction.aiPriority || "P3")
-      .sort();
-    const highestPriority = priorities.length > 0 ? priorities[0] : "P1";
 
     const formatTesterName = (name) => {
       if (!name) return "";
@@ -764,9 +800,9 @@ async function saveToGoogleSheets(interactions) {
       `${testCaseName}`,
       testSteps,
       "",
-      "",
       expectedResults,
-      highestPriority,
+      "",
+      "P1",
       formatTesterName(recordingState.testerName),
       "Pass",
     ];
@@ -808,39 +844,10 @@ async function saveToGoogleSheets(interactions) {
       }
     }
 
-    if (recordingState.targetSpreadsheetId) {
-      try {
-        const testCaseResponse = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Interactions!A:A?majorDimension=COLUMNS`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        if (testCaseResponse.ok) {
-          const data = await testCaseResponse.json();
-          if (data.values && data.values[0]) {
-            if (data.values[0].includes(testCaseId)) {
-              const uniqueTestCaseId = `TC${String(Date.now()).substr(
-                -6
-              )}_${Math.floor(Math.random() * 1000)}`;
-              consolidatedRow[0] = uniqueTestCaseId;
-            }
-          }
-        }
-      } catch (error) {
-        console.error("[Sheets] Error checking existing test case IDs:", error);
-      }
-    }
-
     const response = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`,
       {
-        method: "POST",
+        method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -852,71 +859,15 @@ async function saveToGoogleSheets(interactions) {
     );
 
     if (!response.ok) {
-      if (response.status === 401) {
-        console.log("Token expired during data saving, refreshing...");
-
-        await new Promise((resolve, reject) => {
-          chrome.identity.removeCachedAuthToken({ token }, () => {
-            if (chrome.runtime.lastError) {
-              reject(chrome.runtime.lastError);
-            } else {
-              resolve();
-            }
-          });
-        });
-
-        const getToken = (interactive) => {
-          return new Promise((resolve, reject) => {
-            chrome.identity.getAuthToken(
-              {
-                interactive: interactive,
-                scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-              },
-              (token) => {
-                if (chrome.runtime.lastError) {
-                  reject(chrome.runtime.lastError);
-                } else {
-                  resolve(token);
-                }
-              }
-            );
-          });
-        };
-
-        const newToken = await getToken(true);
-
-        const retryResponse = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${newToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              values: values,
-            }),
-          }
-        );
-
-        if (!retryResponse.ok) {
-          const retryError = await retryResponse.text();
-          throw new Error(
-            `Failed to save data after token refresh: ${retryError}`
-          );
-        }
-
-        console.log(
-          "Data saved to spreadsheet successfully after token refresh"
-        );
-        return;
-      }
-
-      const error = await response.text();
-      throw new Error(`Failed to save to spreadsheet: ${error}`);
+      const errorText = await response.text();
+      console.error("[Sheets] Error writing data:", errorText);
+      throw new Error(`Error writing data to spreadsheet: ${errorText}`);
     }
 
-    console.log("Data saved to spreadsheet successfully");
+    await autoResizeColumns(token, spreadsheetId);
+
+    console.log("[Sheets] Successfully saved interactions to spreadsheet");
+    return spreadsheetUrl;
   } catch (error) {
     console.error("[Sheets] Error in saveToGoogleSheets:", error);
     throw error;
@@ -1318,4 +1269,324 @@ async function formatSpreadsheet(spreadsheetId, token) {
   } catch (error) {
     console.error("[Sheets] Error formatting spreadsheet:", error);
   }
+}
+
+async function autoResizeColumns(token, spreadsheetId) {
+  try {
+    const getResponse = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!getResponse.ok) {
+      const getError = await getResponse.text();
+      console.error("[Sheets] Error getting spreadsheet info:", getError);
+      return;
+    }
+
+    const spreadsheetData = await getResponse.json();
+
+    if (!spreadsheetData.sheets || spreadsheetData.sheets.length === 0) {
+      console.error("[Sheets] No sheets found in the spreadsheet");
+      return;
+    }
+
+    const firstSheetId = spreadsheetData.sheets[0].properties.sheetId;
+
+    const response = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          requests: [
+            {
+              autoResizeDimensions: {
+                dimensions: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 0,
+                  endIndex: 9,
+                },
+              },
+            },
+          ],
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to auto-resize columns: ${error}`);
+    }
+
+    console.log("[Sheets] Columns auto-resized successfully");
+  } catch (error) {
+    console.error("[Sheets] Error auto-resizing columns:", error);
+  }
+}
+
+function formatTestStep(interaction, stepNumber) {
+  if (!interaction) return null;
+
+  switch (interaction.type) {
+    case "navigation":
+      if (stepNumber === 1) {
+        return `${stepNumber}. Start at ${
+          interaction.description
+            ? interaction.description.replace(/^Navigate to |^Start at /, "")
+            : interaction.pageTitle || interaction.toUrl || interaction.url
+        }`;
+      } else {
+        return `${stepNumber}. Navigate to ${
+          interaction.pageTitle || interaction.description
+            ? interaction.description.replace(/^Navigate to |^Start at /, "")
+            : interaction.toUrl || interaction.url
+        }`;
+      }
+
+    case "click":
+      let clickDescription =
+        interaction.description ||
+        `Click on ${interaction.element.tagName.toLowerCase()}`;
+
+      if (clickDescription.startsWith("Click on ")) {
+        clickDescription = clickDescription.replace(
+          "Click on the ",
+          "Click on "
+        );
+      }
+
+      if (
+        interaction.element.tagName === "BUTTON" ||
+        interaction.element.type === "submit" ||
+        interaction.element.type === "button"
+      ) {
+        const buttonText =
+          interaction.element.innerText ||
+          interaction.element.value ||
+          (clickDescription.match(/Click on ['"](.+?)['"]/)
+            ? clickDescription.match(/Click on ['"](.+?)['"]/)[1]
+            : null);
+
+        if (buttonText) {
+          return `${stepNumber}. Click on '${buttonText}' button`;
+        }
+      }
+
+      return `${stepNumber}. ${clickDescription}`;
+
+    case "input":
+      let fieldName = "input field";
+      let inputValue = interaction.inputValue || "";
+
+      const inputMatch = interaction.description.match(/Enter (.+) in (.+)/);
+      if (inputMatch && inputMatch.length >= 3) {
+        inputValue = inputMatch[1];
+        fieldName = inputMatch[2].replace(/^the /, "");
+      }
+
+      if (
+        interaction.element.isMobileField ||
+        interaction.element.type === "tel" ||
+        fieldName.toLowerCase().includes("mobile") ||
+        fieldName.toLowerCase().includes("phone")
+      ) {
+        return `${stepNumber}. Enter ${inputValue} in Mobile Number field`;
+      }
+
+      if (interaction.element.type === "password") {
+        return `${stepNumber}. Enter password in Password field`;
+      }
+
+      if (interaction.element.type === "email") {
+        return `${stepNumber}. Enter ${inputValue} in Email field`;
+      }
+
+      if (
+        fieldName.toLowerCase().includes("otp") ||
+        interaction.element.id?.toLowerCase().includes("otp") ||
+        interaction.element.name?.toLowerCase().includes("otp") ||
+        interaction.element.placeholder?.toLowerCase().includes("otp")
+      ) {
+        return `${stepNumber}. Enter ${inputValue} in OTP field`;
+      }
+
+      return `${stepNumber}. Enter ${inputValue} in ${fieldName}`;
+
+    default:
+      return `${stepNumber}. ${interaction.description || interaction.type}`;
+  }
+}
+
+function processInteractions(interactions) {
+  const cleanedInteractions = interactions.map((interaction) => {
+    const cleanInteraction = { ...interaction };
+
+    if (!cleanInteraction.url) {
+      if (cleanInteraction.type === "navigation" && cleanInteraction.toUrl) {
+        cleanInteraction.url = cleanInteraction.toUrl;
+      } else {
+        cleanInteraction.url = "about:blank";
+      }
+    }
+
+    if (!cleanInteraction.element) {
+      cleanInteraction.element = {
+        tagName: interaction.type === "navigation" ? "PAGE" : "UNKNOWN",
+        xpath: "/html/body",
+        type: interaction.type,
+      };
+    }
+
+    return cleanInteraction;
+  });
+
+  let haveInitialNavigation = false;
+
+  const filteredInteractions = cleanedInteractions.filter(
+    (interaction, index, array) => {
+      if (interaction.type === "navigation") {
+        if (index === 0) {
+          haveInitialNavigation = true;
+          return true;
+        }
+
+        for (let i = 0; i < index; i++) {
+          const prevInteraction = array[i];
+          if (prevInteraction.type === "navigation") {
+            const currentUrl = (
+              interaction.toUrl ||
+              interaction.url ||
+              ""
+            ).split("#")[0];
+            const prevUrl = (
+              prevInteraction.toUrl ||
+              prevInteraction.url ||
+              ""
+            ).split("#")[0];
+
+            if (currentUrl === prevUrl) {
+              return false;
+            }
+          }
+        }
+      }
+
+      if (interaction.type === "click") {
+        for (let i = 0; i < index; i++) {
+          const prevInteraction = array[i];
+          if (
+            prevInteraction.type === "click" &&
+            prevInteraction.element.xpath === interaction.element.xpath &&
+            Math.abs(
+              new Date(prevInteraction.timestamp).getTime() -
+                new Date(interaction.timestamp).getTime()
+            ) < 5000
+          ) {
+            return false;
+          }
+        }
+      }
+
+      if (interaction.type === "input") {
+        for (let i = index + 1; i < array.length; i++) {
+          const laterInteraction = array[i];
+          if (
+            laterInteraction.type === "input" &&
+            laterInteraction.element.xpath === interaction.element.xpath
+          ) {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    }
+  );
+
+  if (filteredInteractions.length > 0 && !haveInitialNavigation) {
+    const firstInteraction = filteredInteractions[0];
+    const startingNavigation = {
+      type: "navigation",
+      timestamp: new Date(
+        new Date(firstInteraction.timestamp).getTime() - 1000
+      ).toISOString(),
+      fromUrl: "",
+      toUrl: firstInteraction.url,
+      url: firstInteraction.url,
+      pageTitle: firstInteraction.pageTitle || "Starting Page",
+      description: `Start at ${
+        firstInteraction.pageTitle || firstInteraction.url
+      }`,
+      expectedResult: "Page should be loaded",
+      element: {
+        tagName: "PAGE",
+        xpath: "/html/body",
+        type: "navigation",
+      },
+    };
+
+    filteredInteractions.unshift(startingNavigation);
+  }
+
+  const enhancedInteractions = filteredInteractions.map(
+    (interaction, index, array) => {
+      let enhancedInteraction = { ...interaction };
+
+      if (interaction.type === "click") {
+        if (index < array.length - 1 && array[index + 1].type === "input") {
+          const nextInput = array[index + 1];
+          enhancedInteraction.isFieldClick = true;
+          enhancedInteraction.followedByInput = true;
+          enhancedInteraction.inputFieldType = nextInput.element.type || "";
+        }
+
+        if (
+          (interaction.element.tagName === "BUTTON" ||
+            interaction.element.type === "submit") &&
+          index > 0 &&
+          array.slice(0, index).some((item) => item.type === "input")
+        ) {
+          enhancedInteraction.isSubmitAfterInput = true;
+        }
+      }
+
+      if (interaction.type === "input") {
+        const fieldName =
+          interaction.description?.match(/Enter .+ in (.+)/)?.[1] || "";
+
+        if (
+          fieldName.toLowerCase().includes("mobile") ||
+          fieldName.toLowerCase().includes("phone") ||
+          interaction.element.type === "tel"
+        ) {
+          enhancedInteraction.specialFieldType = "mobile";
+        } else if (
+          fieldName.toLowerCase().includes("otp") ||
+          interaction.element.id?.toLowerCase().includes("otp") ||
+          interaction.element.name?.toLowerCase().includes("otp")
+        ) {
+          enhancedInteraction.specialFieldType = "otp";
+        } else if (interaction.element.type === "password") {
+          enhancedInteraction.specialFieldType = "password";
+        } else if (interaction.element.type === "email") {
+          enhancedInteraction.specialFieldType = "email";
+        }
+      }
+
+      return enhancedInteraction;
+    }
+  );
+
+  return enhancedInteractions;
 }
