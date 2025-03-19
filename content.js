@@ -8,11 +8,47 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     isRecording: false,
     interactions: [],
     eventHandlers: {}, // Store event handlers so we can remove them later
+    lastUrl: window.location.href, // Track URL for navigation events
   };
 
   console.log(
     "AI Test Ease content script initialized - waiting for recording to start"
   );
+
+  // Check recording state and get stored interactions if recording is active
+  chrome.runtime.sendMessage({ action: "getRecordingState" }, (response) => {
+    if (response && response.isRecording) {
+      console.log("Detected active recording session");
+
+      // Record page load as a navigation interaction
+      const pageLoadInteraction = {
+        type: "navigation",
+        timestamp: new Date().toISOString(),
+        fromUrl: "",
+        toUrl: window.location.href,
+        url: window.location.href,
+        pageTitle: document.title,
+        description: `Navigate to "${document.title || window.location.href}"`,
+        expectedResult: "Page should load successfully",
+        element: {
+          tagName: "PAGE", // Add tagName for navigation events
+          xpath: "/html/body", // Use body as default xpath
+          type: "navigation", // Add type identifier
+        },
+      };
+
+      // Store this navigation interaction
+      chrome.runtime.sendMessage(
+        { action: "storeInteractions", interactions: [pageLoadInteraction] },
+        (storeResponse) => {
+          console.log("Navigation event stored:", storeResponse);
+
+          // Start recording on this page since we're in active recording
+          startRecording();
+        }
+      );
+    }
+  });
 
   // Event handler for clicks
   function handleClick(event) {
@@ -51,6 +87,16 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
 
       window.aiTestEaseState.interactions.push(interaction);
       console.log("Interaction recorded:", interaction.type);
+
+      // Store each interaction immediately in chrome.storage.local
+      chrome.runtime.sendMessage(
+        { action: "storeInteractions", interactions: [interaction] },
+        (response) => {
+          if (!response || response.status !== "success") {
+            console.error("Failed to store interaction:", response);
+          }
+        }
+      );
     } catch (error) {
       console.error("Error recording click:", error);
     }
@@ -74,12 +120,64 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
           xpath: getXPath(target),
         },
         url: window.location.href,
+        pageTitle: document.title,
+        description: `Focus on ${target.tagName.toLowerCase()} element`,
+        expectedResult: "Element should receive focus",
       };
 
       window.aiTestEaseState.interactions.push(interaction);
       console.log("Interaction recorded:", interaction.type);
+
+      // Store each interaction immediately
+      chrome.runtime.sendMessage(
+        { action: "storeInteractions", interactions: [interaction] },
+        (response) => {
+          if (!response || response.status !== "success") {
+            console.error("Failed to store interaction:", response);
+          }
+        }
+      );
     } catch (error) {
       console.error("Error recording focus:", error);
+    }
+  }
+
+  // Function to check for URL changes (page navigation)
+  function checkForNavigation() {
+    if (!window.aiTestEaseState.isRecording) return;
+
+    const currentUrl = window.location.href;
+    if (currentUrl !== window.aiTestEaseState.lastUrl) {
+      // URL has changed, record a navigation interaction
+      const interaction = {
+        type: "navigation",
+        timestamp: new Date().toISOString(),
+        fromUrl: window.aiTestEaseState.lastUrl,
+        toUrl: currentUrl,
+        url: currentUrl,
+        pageTitle: document.title,
+        description: `Navigate to "${document.title || currentUrl}"`,
+        expectedResult: "Page should load successfully",
+        element: {
+          tagName: "PAGE", // Add tagName for navigation events
+          xpath: "/html/body", // Use body as default xpath
+          type: "navigation", // Add type identifier
+        },
+      };
+
+      window.aiTestEaseState.interactions.push(interaction);
+      window.aiTestEaseState.lastUrl = currentUrl;
+      console.log("Navigation recorded:", interaction.description);
+
+      // Store the navigation interaction
+      chrome.runtime.sendMessage(
+        { action: "storeInteractions", interactions: [interaction] },
+        (response) => {
+          if (!response || response.status !== "success") {
+            console.error("Failed to store navigation:", response);
+          }
+        }
+      );
     }
   }
 
@@ -115,18 +213,23 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         stepNumber++;
       }
 
+      // Ensure element exists
+      const element = interaction.element || {};
+
       // Determine the best element identifier (prioritize ID, then name, etc.)
       let elementIdentifier = "";
-      if (interaction.element.id) {
-        elementIdentifier = `id=${interaction.element.id}`;
-      } else if (interaction.element.name) {
-        elementIdentifier = `name=${interaction.element.name}`;
-      } else if (interaction.element.testId) {
-        elementIdentifier = `data-testid=${interaction.element.testId}`;
-      } else if (interaction.element.className) {
-        elementIdentifier = `class=${interaction.element.className}`;
-      } else {
-        elementIdentifier = interaction.element.xpath;
+      if (element.id) {
+        elementIdentifier = `id=${element.id}`;
+      } else if (element.name) {
+        elementIdentifier = `name=${element.name}`;
+      } else if (element.testId) {
+        elementIdentifier = `data-testid=${element.testId}`;
+      } else if (element.className) {
+        elementIdentifier = `class=${element.className}`;
+      } else if (element.xpath) {
+        elementIdentifier = element.xpath;
+      } else if (interaction.type === "navigation") {
+        elementIdentifier = "URL";
       }
 
       return [
@@ -134,12 +237,13 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         `TC_${testCaseId}`,
         interaction.type,
         interaction.description ||
-          `${interaction.type} on ${interaction.element.tagName}`,
-        interaction.element.tagName,
+          `${interaction.type} on ${element.tagName || "page"}`,
+        element.tagName ||
+          (interaction.type === "navigation" ? "page" : "unknown"),
         elementIdentifier,
         interaction.expectedResult || "Action should complete successfully",
         interaction.url,
-        interaction.element.xpath,
+        element.xpath || "",
         interaction.pageTitle || "",
         interaction.timestamp,
       ];
@@ -152,16 +256,32 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
   function startRecording() {
     console.log("Starting recording - attaching event listeners");
     window.aiTestEaseState.isRecording = true;
-    window.aiTestEaseState.interactions = [];
+    window.aiTestEaseState.lastUrl = window.location.href;
 
     // Attach event listeners and store references to them
     document.addEventListener("click", handleClick);
     document.addEventListener("focus", handleFocus, true);
 
+    // Set up a MutationObserver to detect DOM changes which might indicate navigation
+    const observer = new MutationObserver(() => {
+      checkForNavigation();
+    });
+
+    observer.observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: false,
+    });
+
+    // Also check for navigation periodically
+    const navigationInterval = setInterval(checkForNavigation, 1000);
+
     // Store references to the handlers
     window.aiTestEaseState.eventHandlers = {
       click: handleClick,
       focus: handleFocus,
+      observer: observer,
+      navigationInterval: navigationInterval,
     };
   }
 
@@ -186,6 +306,16 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       );
     }
 
+    // Disconnect the MutationObserver
+    if (window.aiTestEaseState.eventHandlers.observer) {
+      window.aiTestEaseState.eventHandlers.observer.disconnect();
+    }
+
+    // Clear the navigation check interval
+    if (window.aiTestEaseState.eventHandlers.navigationInterval) {
+      clearInterval(window.aiTestEaseState.eventHandlers.navigationInterval);
+    }
+
     // Clear event handler references
     window.aiTestEaseState.eventHandlers = {};
   }
@@ -198,7 +328,8 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         sendResponse({ status: "Recording started" });
       } else if (message.action === "stopRecording") {
         stopRecording();
-        // Send recorded interactions to background script
+        // Send recorded interactions to background script for saving
+        // Only send the interactions from this page - background will combine with stored ones
         chrome.runtime.sendMessage(
           {
             action: "saveInteractions",

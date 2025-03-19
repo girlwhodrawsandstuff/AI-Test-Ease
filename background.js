@@ -33,6 +33,9 @@ const AI_CONFIG = {
 // Handle messages from content script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "startRecording") {
+    // Clear any previously stored interactions when starting a new recording
+    chrome.storage.local.set({ interactions: [] });
+
     // Get the current active tab if sender.tab is not available
     if (!sender.tab) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -84,17 +87,80 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === "getRecordingState") {
     sendResponse(recordingState);
   } else if (message.action === "saveInteractions") {
-    saveToGoogleSheets(message.interactions)
-      .then(() => {
-        sendResponse({ status: "success", url: spreadsheetUrl });
-      })
-      .catch((error) => {
-        console.error("Error saving interactions:", error);
-        sendResponse({ status: "error", error: error.message });
-      });
+    // Get all interactions from storage
+    chrome.storage.local.get(["interactions"], (result) => {
+      const allInteractions = result.interactions || [];
+
+      // If new interactions provided, save them to our final list
+      if (message.interactions && message.interactions.length > 0) {
+        // Add them to storage first
+        chrome.storage.local.set(
+          {
+            interactions: [...allInteractions, ...message.interactions],
+          },
+          () => {
+            // Then get the updated list for saving
+            chrome.storage.local.get(["interactions"], (updatedResult) => {
+              const finalInteractions = updatedResult.interactions || [];
+              console.log("Saving all interactions:", finalInteractions.length);
+
+              saveToGoogleSheets(finalInteractions)
+                .then(() => {
+                  sendResponse({ status: "success", url: spreadsheetUrl });
+                  // Clear interactions after successful save
+                  chrome.storage.local.remove("interactions");
+                })
+                .catch((error) => {
+                  console.error("Error saving interactions:", error);
+                  sendResponse({ status: "error", error: error.message });
+                });
+            });
+          }
+        );
+      } else {
+        // No new interactions, use what's in storage
+        console.log(
+          "No new interactions, using stored interactions:",
+          allInteractions.length
+        );
+        saveToGoogleSheets(allInteractions)
+          .then(() => {
+            sendResponse({ status: "success", url: spreadsheetUrl });
+            // Clear interactions after successful save
+            chrome.storage.local.remove("interactions");
+          })
+          .catch((error) => {
+            console.error("Error saving interactions:", error);
+            sendResponse({ status: "error", error: error.message });
+          });
+      }
+    });
     return true; // Will respond asynchronously
   } else if (message.action === "getSpreadsheetInfo") {
     sendResponse({ url: spreadsheetUrl });
+  } else if (message.action === "storeInteractions") {
+    // Store interactions in chrome.storage.local
+    chrome.storage.local.get(["interactions"], (result) => {
+      const existingInteractions = result.interactions || [];
+      const newInteractions = [
+        ...existingInteractions,
+        ...message.interactions,
+      ];
+
+      chrome.storage.local.set({ interactions: newInteractions }, () => {
+        console.log(
+          `Stored ${message.interactions.length} interactions, total: ${newInteractions.length}`
+        );
+        sendResponse({ status: "success" });
+      });
+    });
+    return true; // Will respond asynchronously
+  } else if (message.action === "getStoredInteractions") {
+    // Retrieve stored interactions
+    chrome.storage.local.get(["interactions"], (result) => {
+      sendResponse({ interactions: result.interactions || [] });
+    });
+    return true; // Will respond asynchronously
   }
 });
 
@@ -457,6 +523,50 @@ async function processInteractionsWithAI(interactions) {
     };
   }
 
+  // Ensure all interactions have element property to prevent errors
+  const cleanedInteractions = interactions.map((interaction) => {
+    // Make a copy to avoid modifying the original
+    const cleanInteraction = { ...interaction };
+
+    // Ensure url property exists
+    if (!cleanInteraction.url) {
+      // For navigation interactions, use toUrl if available
+      if (cleanInteraction.type === "navigation" && cleanInteraction.toUrl) {
+        cleanInteraction.url = cleanInteraction.toUrl;
+      } else {
+        // Fallback to a default value
+        cleanInteraction.url = "about:blank";
+      }
+    }
+
+    // Ensure element exists with required properties
+    if (!cleanInteraction.element) {
+      cleanInteraction.element = {
+        tagName: interaction.type === "navigation" ? "PAGE" : "UNKNOWN",
+        xpath: "/html/body",
+        type: interaction.type,
+      };
+    } else {
+      // Ensure element has tagName property
+      if (!cleanInteraction.element.tagName) {
+        cleanInteraction.element.tagName =
+          interaction.type === "navigation" ? "PAGE" : "UNKNOWN";
+      }
+
+      // Ensure xpath exists
+      if (!cleanInteraction.element.xpath) {
+        cleanInteraction.element.xpath = "/html/body";
+      }
+
+      // Ensure type exists
+      if (!cleanInteraction.element.type) {
+        cleanInteraction.element.type = interaction.type;
+      }
+    }
+
+    return cleanInteraction;
+  });
+
   try {
     console.log("[AI] Starting AI analysis of interactions");
     console.log("[AI] Using backend URL:", AI_CONFIG.backendUrl);
@@ -474,13 +584,13 @@ async function processInteractionsWithAI(interactions) {
       console.log(
         "[AI] Sending interactions to backend:",
         JSON.stringify({
-          interactionCount: interactions.length,
+          interactionCount: cleanedInteractions.length,
           sampleInteraction:
-            interactions.length > 0
+            cleanedInteractions.length > 0
               ? {
-                  type: interactions[0].type,
-                  url: interactions[0].url,
-                  hasElement: !!interactions[0].element,
+                  type: cleanedInteractions[0].type,
+                  url: cleanedInteractions[0].url,
+                  hasElement: !!cleanedInteractions[0].element,
                 }
               : null,
         })
@@ -491,7 +601,7 @@ async function processInteractionsWithAI(interactions) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ interactions }),
+        body: JSON.stringify({ interactions: cleanedInteractions }),
         signal: controller.signal,
       });
 
@@ -530,18 +640,20 @@ async function processInteractionsWithAI(interactions) {
       console.log("[AI] AI analysis complete:", aiResponse);
 
       // Enhance the original interactions with AI-generated content
-      const enhancedInteractions = interactions.map((interaction, index) => {
-        if (index < aiResponse.interactions.length) {
-          return {
-            ...interaction,
-            aiActionDescription:
-              aiResponse.interactions[index].actionDescription,
-            aiExpectedResult: aiResponse.interactions[index].expectedResult,
-            aiPriority: aiResponse.interactions[index].priority,
-          };
+      const enhancedInteractions = cleanedInteractions.map(
+        (interaction, index) => {
+          if (index < aiResponse.interactions.length) {
+            return {
+              ...interaction,
+              aiActionDescription:
+                aiResponse.interactions[index].actionDescription,
+              aiExpectedResult: aiResponse.interactions[index].expectedResult,
+              aiPriority: aiResponse.interactions[index].priority,
+            };
+          }
+          return interaction;
         }
-        return interaction;
-      });
+      );
 
       return {
         interactions: enhancedInteractions,
@@ -564,39 +676,56 @@ async function processInteractionsWithAI(interactions) {
     console.error("[AI] Error processing interactions with AI:", error);
 
     // Create basic fallback data
-    const fallbackInteractions = interactions.map((interaction) => {
-      let actionDesc = `${interaction.type} on ${
-        interaction.element.tagName || "element"
-      }`;
+    const fallbackInteractions = cleanedInteractions.map((interaction) => {
+      // Ensure element has all required properties
+      const element = interaction.element || {};
+      const tagName =
+        element.tagName ||
+        (interaction.type === "navigation" ? "PAGE" : "UNKNOWN");
+
+      let actionDesc = `${interaction.type} on ${tagName}`;
 
       // Add more context if available
-      if (interaction.element.innerText) {
-        actionDesc += ` with text "${interaction.element.innerText.substring(
-          0,
-          30
-        )}"`;
-      } else if (interaction.element.id) {
-        actionDesc += ` with id "${interaction.element.id}"`;
-      } else if (interaction.element.className) {
-        actionDesc += ` with class "${interaction.element.className}"`;
+      if (element.innerText) {
+        actionDesc += ` with text "${element.innerText.substring(0, 30)}"`;
+      } else if (element.id) {
+        actionDesc += ` with id "${element.id}"`;
+      } else if (element.className) {
+        actionDesc += ` with class "${element.className}"`;
       }
 
       return {
         ...interaction,
-        aiActionDescription: actionDesc,
-        aiExpectedResult: "The action should complete successfully",
+        aiActionDescription: interaction.description || actionDesc,
+        aiExpectedResult:
+          interaction.expectedResult ||
+          "The action should complete successfully",
         aiPriority: "P1",
       };
     });
 
     // Create a test name based on URL if possible
     let testName = "User Interaction Test";
-    if (interactions.length > 0 && interactions[0].url) {
-      try {
-        const url = new URL(interactions[0].url);
-        testName = `Interaction Test on ${url.hostname}`;
-      } catch (e) {
-        // Use default if URL parsing fails
+    if (cleanedInteractions.length > 0) {
+      if (cleanedInteractions[0].url) {
+        try {
+          const url = new URL(cleanedInteractions[0].url);
+          testName = `Interaction Test on ${url.hostname}`;
+        } catch (e) {
+          // Use a default based on the URL if parsing fails
+          testName = `Interaction Test on ${cleanedInteractions[0].url.substring(
+            0,
+            30
+          )}`;
+        }
+      } else if (cleanedInteractions[0].toUrl) {
+        // Try toUrl as fallback if url doesn't exist
+        try {
+          const url = new URL(cleanedInteractions[0].toUrl);
+          testName = `Interaction Test on ${url.hostname}`;
+        } catch (e) {
+          // Use default test name
+        }
       }
     }
 
