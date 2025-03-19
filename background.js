@@ -23,6 +23,12 @@ let recordingState = {
   targetSpreadsheetId: null, // Store spreadsheet ID from user input
 };
 
+// Configuration for AI integration
+const AI_CONFIG = {
+  enabled: true, // AI processing is enabled by default
+  backendUrl: "http://localhost:5000", // URL to your backend service
+};
+
 // Handle messages from content script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "startRecording") {
@@ -181,6 +187,9 @@ async function createSpreadsheet() {
   try {
     // Check if we should use an existing spreadsheet
     if (recordingState.targetSpreadsheetId) {
+      console.log(
+        `[Sheets] Using existing spreadsheet: ${recordingState.targetSpreadsheetId}`
+      );
       spreadsheetId = recordingState.targetSpreadsheetId;
       spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
 
@@ -189,11 +198,13 @@ async function createSpreadsheet() {
       return spreadsheetId;
     }
 
+    console.log("[Sheets] Starting spreadsheet creation process");
     const token = await getAccessToken();
     if (!token) {
       throw new Error("Failed to get auth token");
     }
 
+    console.log("[Sheets] Creating new spreadsheet with valid token");
     const response = await fetch(
       "https://sheets.googleapis.com/v4/spreadsheets",
       {
@@ -212,6 +223,7 @@ async function createSpreadsheet() {
                 title: "Interactions",
                 gridProperties: {
                   frozenRowCount: 1,
+                  columnCount: 7, // Updated for new column structure (7 columns now)
                 },
               },
             },
@@ -239,6 +251,8 @@ async function createSpreadsheet() {
 
       // If unauthorized, try to refresh the token
       if (response.status === 401) {
+        console.log("[Sheets] Token expired, refreshing...");
+
         // Revoke the current token
         await new Promise((resolve, reject) => {
           chrome.identity.removeCachedAuthToken({ token }, () => {
@@ -249,6 +263,7 @@ async function createSpreadsheet() {
               );
               reject(chrome.runtime.lastError);
             } else {
+              console.log("[Sheets] Successfully revoked token");
               resolve();
             }
           });
@@ -270,6 +285,7 @@ async function createSpreadsheet() {
                   );
                   reject(chrome.runtime.lastError);
                 } else {
+                  console.log("[Sheets] Successfully obtained new token");
                   resolve(token);
                 }
               }
@@ -278,6 +294,7 @@ async function createSpreadsheet() {
         };
 
         const newToken = await getToken(true);
+        console.log("[Sheets] Retrying spreadsheet creation with new token");
 
         // Retry with new token
         const retryResponse = await fetch(
@@ -298,6 +315,7 @@ async function createSpreadsheet() {
                     title: "Interactions",
                     gridProperties: {
                       frozenRowCount: 1,
+                      columnCount: 7, // Updated for new column structure
                     },
                   },
                 },
@@ -322,6 +340,10 @@ async function createSpreadsheet() {
         const data = await retryResponse.json();
         spreadsheetId = data.spreadsheetId;
         spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
+        console.log(
+          "[Sheets] Spreadsheet created after token refresh:",
+          spreadsheetUrl
+        );
         return spreadsheetId;
       }
 
@@ -333,6 +355,65 @@ async function createSpreadsheet() {
     const data = await response.json();
     spreadsheetId = data.spreadsheetId;
     spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
+    console.log("[Sheets] Spreadsheet created successfully:", spreadsheetUrl);
+
+    // Format the spreadsheet headers
+    try {
+      // Add bold formatting to the header row
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            requests: [
+              {
+                repeatCell: {
+                  range: {
+                    sheetId: 0,
+                    startRowIndex: 0,
+                    endRowIndex: 1,
+                    startColumnIndex: 0,
+                    endColumnIndex: 7, // Updated to 7 columns
+                  },
+                  cell: {
+                    userEnteredFormat: {
+                      textFormat: {
+                        bold: true,
+                      },
+                      backgroundColor: {
+                        red: 0.9,
+                        green: 0.9,
+                        blue: 0.9,
+                      },
+                    },
+                  },
+                  fields: "userEnteredFormat(textFormat,backgroundColor)",
+                },
+              },
+              {
+                updateSheetProperties: {
+                  properties: {
+                    sheetId: 0,
+                    gridProperties: {
+                      frozenRowCount: 1,
+                    },
+                  },
+                  fields: "gridProperties.frozenRowCount",
+                },
+              },
+            ],
+          }),
+        }
+      );
+    } catch (error) {
+      console.error("[Sheets] Error formatting spreadsheet:", error);
+      // Non-fatal error, we can continue
+    }
+
     return spreadsheetId;
   } catch (error) {
     console.error("[Sheets] Error in createSpreadsheet:", error);
@@ -378,7 +459,91 @@ async function verifySpreadsheetAccess(spreadsheetId) {
   }
 }
 
+// Function to analyze interactions with AI and generate descriptions and test cases
+async function processInteractionsWithAI(interactions) {
+  if (!AI_CONFIG.enabled) {
+    console.log("[AI] AI processing is disabled");
+    return {
+      interactions: interactions,
+      testCaseName: "User Interaction Test",
+    };
+  }
+
+  try {
+    console.log("[AI] Starting AI analysis of interactions");
+
+    // Call our backend service instead of OpenAI directly
+    const response = await fetch(`${AI_CONFIG.backendUrl}/api/analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ interactions }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error("[AI] Backend API error:", errorData);
+      throw new Error(`Backend API error: ${errorData}`);
+    }
+
+    const data = await response.json();
+    const aiResponse = JSON.parse(data.result);
+    console.log("[AI] AI analysis complete:", aiResponse);
+
+    // Enhance the original interactions with AI-generated content
+    const enhancedInteractions = interactions.map((interaction, index) => {
+      if (index < aiResponse.interactions.length) {
+        return {
+          ...interaction,
+          aiActionDescription: aiResponse.interactions[index].actionDescription,
+          aiExpectedResult: aiResponse.interactions[index].expectedResult,
+          aiPriority: aiResponse.interactions[index].priority,
+        };
+      }
+      return interaction;
+    });
+
+    return {
+      interactions: enhancedInteractions,
+      testCaseName: aiResponse.testCaseName,
+    };
+  } catch (error) {
+    console.error("[AI] Error processing interactions with AI:", error);
+    return {
+      interactions: interactions,
+      testCaseName: "User Interaction Test",
+    };
+  }
+}
+
+// Update in chrome.storage when AI settings change
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === "sync") {
+    if (changes.aiEnabled) {
+      AI_CONFIG.enabled = changes.aiEnabled.newValue;
+    }
+    if (changes.backendUrl) {
+      AI_CONFIG.backendUrl = changes.backendUrl.newValue;
+    }
+  }
+});
+
+// Initialize AI settings from storage
+chrome.storage.sync.get(["aiEnabled", "backendUrl"], (result) => {
+  if (result.aiEnabled !== undefined) AI_CONFIG.enabled = result.aiEnabled;
+  if (result.backendUrl) AI_CONFIG.backendUrl = result.backendUrl;
+});
+
+// Modify the saveToGoogleSheets function to use AI
 async function saveToGoogleSheets(interactions) {
+  console.log("Saving interactions:", interactions);
+
+  // Process interactions with AI if enabled
+  const processedData = await processInteractionsWithAI(interactions);
+  const enhancedInteractions = processedData.interactions;
+  const testCaseName = processedData.testCaseName;
+
   if (!spreadsheetId) {
     await createSpreadsheet();
   }
@@ -395,34 +560,35 @@ async function saveToGoogleSheets(interactions) {
   // Check if we need to add headers (only for new spreadsheets)
   let needsHeaders = !recordingState.targetSpreadsheetId;
 
-  // Prepare the data
+  // Generate a unique Test Case ID for this recording session
+  const testCaseId = `TC${String(Date.now()).substr(-6)}`;
+
+  // Prepare the data with the new format
   const headers = [
-    "Timestamp",
-    "Type",
+    "Test_Case_ID",
+    "Test_Case_Name",
+    "Step_Number",
+    "Action_Description",
+    "Expected_Result",
+    "Priority",
     "URL",
-    "Element Tag",
-    "Element ID",
-    "Element Class",
-    "Element Text",
-    "XPath",
   ];
 
-  const rows = interactions.map((interaction) => [
-    interaction.timestamp,
-    interaction.type,
-    interaction.url,
-    interaction.element.tagName,
-    interaction.element.id,
-    interaction.element.className,
-    interaction.element.innerText || interaction.element.placeholder || "",
-    interaction.element.xpath,
+  const rows = enhancedInteractions.map((interaction, index) => [
+    testCaseId, // Test_Case_ID (same for all steps in this recording)
+    testCaseName, // Test_Case_Name from AI or default
+    index + 1, // Step_Number (increments for each interaction)
+    interaction.aiActionDescription || "", // Action_Description from AI
+    interaction.aiExpectedResult || "", // Expected_Result from AI
+    interaction.aiPriority || "P1", // Priority from AI or default P1
+    interaction.url, // URL
   ]);
 
   // Add headers if this is a new spreadsheet
   const values = needsHeaders ? [headers, ...rows] : rows;
 
   // Determine where to append data
-  let range = needsHeaders ? "Interactions!A1" : "Interactions!A:H";
+  let range = needsHeaders ? "Interactions!A1" : "Interactions!A:G";
 
   // If using an existing spreadsheet, find the next empty row
   if (recordingState.targetSpreadsheetId) {
@@ -455,7 +621,41 @@ async function saveToGoogleSheets(interactions) {
     } catch (error) {
       console.error("[Sheets] Error finding next empty row:", error);
       // Fall back to appending
-      range = "Interactions!A:H";
+      range = "Interactions!A:G";
+    }
+  }
+
+  // Handle existing test case IDs to ensure uniqueness
+  if (recordingState.targetSpreadsheetId) {
+    try {
+      // Check for existing test case IDs
+      const testCaseResponse = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Interactions!A:A?majorDimension=COLUMNS`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (testCaseResponse.ok) {
+        const data = await testCaseResponse.json();
+        if (data.values && data.values[0]) {
+          // If our testCaseId already exists, generate a new one
+          if (data.values[0].includes(testCaseId)) {
+            // Generate a truly unique one by adding a random suffix
+            const uniqueTestCaseId = `TC${String(Date.now()).substr(
+              -6
+            )}_${Math.floor(Math.random() * 1000)}`;
+            // Update all rows with the new ID
+            rows.forEach((row) => (row[0] = uniqueTestCaseId));
+          }
+        }
+      }
+    } catch (error) {
+      console.error("[Sheets] Error checking existing test case IDs:", error);
     }
   }
 
@@ -476,6 +676,8 @@ async function saveToGoogleSheets(interactions) {
   if (!response.ok) {
     // If token is expired, try refreshing it
     if (response.status === 401) {
+      console.log("Token expired during data saving, refreshing...");
+
       // Revoke the current token
       await new Promise((resolve, reject) => {
         chrome.identity.removeCachedAuthToken({ token }, () => {
@@ -530,10 +732,13 @@ async function saveToGoogleSheets(interactions) {
         );
       }
 
+      console.log("Data saved to spreadsheet successfully after token refresh");
       return;
     }
 
     const error = await response.text();
     throw new Error(`Failed to save to spreadsheet: ${error}`);
   }
+
+  console.log("Data saved to spreadsheet successfully");
 }

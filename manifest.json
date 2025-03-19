@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AI Test Ease",
   "version": "1.0",
-  "description": "Records user interactions and saves them to Google Sheets",
+  "description": "Records user interactions and saves them to Google Sheets with AI-powered test case generation",
   "permissions": [
     "activeTab",
     "storage",

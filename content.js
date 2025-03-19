@@ -28,8 +28,25 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
           className: target.className,
           innerText: target.innerText?.substring(0, 100),
           xpath: getXPath(target),
+          // Additional properties useful for test automation
+          name: target.name || "",
+          value: target.value || "",
+          type: target.type || "",
+          href: target.href || "",
+          ariaLabel: target.getAttribute("aria-label") || "",
+          testId: target.getAttribute("data-testid") || "",
         },
         url: window.location.href,
+        // Add page title which helps in documentation
+        pageTitle: document.title,
+        // Add suggested step description
+        description: `Click on ${
+          target.innerText
+            ? `"${target.innerText.substring(0, 30)}"`
+            : target.tagName.toLowerCase()
+        }`,
+        // Add suggested expected result
+        expectedResult: "Element should respond to click action",
       };
 
       window.aiTestEaseState.interactions.push(interaction);
@@ -64,6 +81,71 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     } catch (error) {
       console.error("Error recording focus:", error);
     }
+  }
+
+  // Function to format interactions for test automation
+  function formatInteractionsForTestAutomation(interactions) {
+    // Prepare the data specifically for test automation
+    const headers = [
+      "Step #",
+      "Test Case ID",
+      "Action Type",
+      "Description",
+      "Element Type",
+      "Element Identifier",
+      "Expected Result",
+      "URL",
+      "XPath",
+      "Page Title",
+      "Timestamp",
+    ];
+
+    // Group interactions into test cases (each page/URL could be a separate test case)
+    let testCaseId = 1;
+    let currentUrl = "";
+    let stepNumber = 1;
+
+    const rows = interactions.map((interaction, index) => {
+      // If URL changes, consider it a new test case
+      if (currentUrl !== interaction.url) {
+        currentUrl = interaction.url;
+        testCaseId++;
+        stepNumber = 1;
+      } else {
+        stepNumber++;
+      }
+
+      // Determine the best element identifier (prioritize ID, then name, etc.)
+      let elementIdentifier = "";
+      if (interaction.element.id) {
+        elementIdentifier = `id=${interaction.element.id}`;
+      } else if (interaction.element.name) {
+        elementIdentifier = `name=${interaction.element.name}`;
+      } else if (interaction.element.testId) {
+        elementIdentifier = `data-testid=${interaction.element.testId}`;
+      } else if (interaction.element.className) {
+        elementIdentifier = `class=${interaction.element.className}`;
+      } else {
+        elementIdentifier = interaction.element.xpath;
+      }
+
+      return [
+        stepNumber,
+        `TC_${testCaseId}`,
+        interaction.type,
+        interaction.description ||
+          `${interaction.type} on ${interaction.element.tagName}`,
+        interaction.element.tagName,
+        elementIdentifier,
+        interaction.expectedResult || "Action should complete successfully",
+        interaction.url,
+        interaction.element.xpath,
+        interaction.pageTitle || "",
+        interaction.timestamp,
+      ];
+    });
+
+    return { headers, rows };
   }
 
   // Function to start recording (attach event listeners)
@@ -127,6 +209,12 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
           }
         );
         return true; // Will respond asynchronously
+      } else if (message.action === "formatInteractions") {
+        // If we need to format interactions outside the extension
+        const formatted = formatInteractionsForTestAutomation(
+          message.interactions
+        );
+        sendResponse({ status: "success", data: formatted });
       }
     } catch (error) {
       console.error("Error in content script:", error);

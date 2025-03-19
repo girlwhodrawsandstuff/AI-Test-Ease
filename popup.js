@@ -1,12 +1,60 @@
 document.addEventListener("DOMContentLoaded", () => {
+  console.log("Popup opened - initializing UI");
+
   const startButton = document.getElementById("startRecording");
   const stopButton = document.getElementById("stopRecording");
   const spreadsheetUrlInput = document.getElementById("spreadsheetUrl");
   const statusDiv = document.getElementById("status");
 
+  // AI Configuration elements
+  const aiEnabledCheckbox = document.getElementById("aiEnabled");
+  const aiSettingsDiv = document.getElementById("aiSettings");
+  const backendUrlInput = document.getElementById("backendUrl");
+
+  // Explicit debugging of initial element states
+  console.log("Initial DOM elements:", {
+    startButton: startButton ? "found" : "missing",
+    stopButton: stopButton ? "found" : "missing",
+    stopButtonDisabled: stopButton ? stopButton.disabled : "N/A",
+    stopButtonClass: stopButton ? stopButton.className : "N/A",
+  });
+
   // Initial button states - ensure stop button is disabled on load
   stopButton.disabled = true;
   stopButton.classList.add("disabled-button");
+  console.log(
+    "After explicit setting - Stop button disabled:",
+    stopButton.disabled
+  );
+
+  // Load saved AI settings or use defaults
+  chrome.storage.sync.get(["aiEnabled", "backendUrl"], (result) => {
+    // Default to enabled if not set
+    const isEnabled = result.aiEnabled !== undefined ? result.aiEnabled : true;
+
+    if (result.backendUrl) {
+      backendUrlInput.value = result.backendUrl;
+    } else {
+      backendUrlInput.value = "http://localhost:5000";
+    }
+
+    aiEnabledCheckbox.checked = isEnabled;
+    aiSettingsDiv.classList.toggle("hidden", !isEnabled);
+  });
+
+  // Toggle AI settings visibility when checkbox changes
+  aiEnabledCheckbox.addEventListener("change", () => {
+    const isEnabled = aiEnabledCheckbox.checked;
+    aiSettingsDiv.classList.toggle("hidden", !isEnabled);
+
+    // Save setting to storage
+    chrome.storage.sync.set({ aiEnabled: isEnabled });
+  });
+
+  // Save backend URL when it changes
+  backendUrlInput.addEventListener("change", () => {
+    chrome.storage.sync.set({ backendUrl: backendUrlInput.value });
+  });
 
   // Function to set recording UI state
   function setRecordingState(isRecording) {
@@ -18,8 +66,14 @@ document.addEventListener("DOMContentLoaded", () => {
       // Make sure stop button is enabled
       stopButton.disabled = false;
       stopButton.classList.remove("disabled-button");
+      console.log(
+        "Recording active: Stop button is now enabled:",
+        !stopButton.disabled
+      );
 
       spreadsheetUrlInput.disabled = true;
+      aiEnabledCheckbox.disabled = true;
+      backendUrlInput.disabled = true;
     } else {
       startButton.textContent = "Start Recording";
       startButton.disabled = false;
@@ -28,8 +82,14 @@ document.addEventListener("DOMContentLoaded", () => {
       // Make sure stop button is disabled
       stopButton.disabled = true;
       stopButton.classList.add("disabled-button");
+      console.log(
+        "Recording inactive: Stop button is now disabled:",
+        stopButton.disabled
+      );
 
       spreadsheetUrlInput.disabled = false;
+      aiEnabledCheckbox.disabled = false;
+      backendUrlInput.disabled = false;
     }
   }
 
@@ -37,6 +97,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateStatus(message, isError = false) {
     statusDiv.textContent = message;
     statusDiv.className = isError ? "error" : "success";
+    console.log(`Status: ${message}`);
   }
 
   // Function to extract spreadsheet ID from URL
