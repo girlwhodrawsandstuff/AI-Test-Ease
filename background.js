@@ -1332,18 +1332,19 @@ function formatTestStep(interaction, stepNumber) {
 
   switch (interaction.type) {
     case "navigation":
+      let url = interaction.toUrl || interaction.url || "";
+      // Ensure URL is secure (starts with https://)
+      if (url && !url.startsWith("https://")) {
+        url = url.replace(/^http:\/\//, "https://");
+        if (!url.startsWith("https://")) {
+          url = "https://" + url.replace(/^[^:]+:\/\//, "");
+        }
+      }
+
       if (stepNumber === 1) {
-        return `${stepNumber}. Start at ${
-          interaction.description
-            ? interaction.description.replace(/^Navigate to |^Start at /, "")
-            : interaction.pageTitle || interaction.toUrl || interaction.url
-        }`;
+        return `${stepNumber}. Go to ${url}`;
       } else {
-        return `${stepNumber}. Navigate to ${
-          interaction.pageTitle || interaction.description
-            ? interaction.description.replace(/^Navigate to |^Start at /, "")
-            : interaction.toUrl || interaction.url
-        }`;
+        return `${stepNumber}. Navigate to ${url}`;
       }
 
     case "click":
@@ -1432,6 +1433,32 @@ function processInteractions(interactions) {
       }
     }
 
+    // Ensure URLs are secure
+    if (cleanInteraction.url && !cleanInteraction.url.startsWith("https://")) {
+      cleanInteraction.url = cleanInteraction.url.replace(
+        /^http:\/\//,
+        "https://"
+      );
+      if (!cleanInteraction.url.startsWith("https://")) {
+        cleanInteraction.url =
+          "https://" + cleanInteraction.url.replace(/^[^:]+:\/\//, "");
+      }
+    }
+
+    if (
+      cleanInteraction.toUrl &&
+      !cleanInteraction.toUrl.startsWith("https://")
+    ) {
+      cleanInteraction.toUrl = cleanInteraction.toUrl.replace(
+        /^http:\/\//,
+        "https://"
+      );
+      if (!cleanInteraction.toUrl.startsWith("https://")) {
+        cleanInteraction.toUrl =
+          "https://" + cleanInteraction.toUrl.replace(/^[^:]+:\/\//, "");
+      }
+    }
+
     if (!cleanInteraction.element) {
       cleanInteraction.element = {
         tagName: interaction.type === "navigation" ? "PAGE" : "UNKNOWN",
@@ -1508,18 +1535,26 @@ function processInteractions(interactions) {
 
   if (filteredInteractions.length > 0 && !haveInitialNavigation) {
     const firstInteraction = filteredInteractions[0];
+    let startUrl = firstInteraction.url || "about:blank";
+
+    // Ensure the starting URL is secure
+    if (!startUrl.startsWith("https://")) {
+      startUrl = startUrl.replace(/^http:\/\//, "https://");
+      if (!startUrl.startsWith("https://")) {
+        startUrl = "https://" + startUrl.replace(/^[^:]+:\/\//, "");
+      }
+    }
+
     const startingNavigation = {
       type: "navigation",
       timestamp: new Date(
         new Date(firstInteraction.timestamp).getTime() - 1000
       ).toISOString(),
       fromUrl: "",
-      toUrl: firstInteraction.url,
-      url: firstInteraction.url,
+      toUrl: startUrl,
+      url: startUrl,
       pageTitle: firstInteraction.pageTitle || "Starting Page",
-      description: `Start at ${
-        firstInteraction.pageTitle || firstInteraction.url
-      }`,
+      description: `Go to ${startUrl}`,
       expectedResult: "Page should be loaded",
       element: {
         tagName: "PAGE",
