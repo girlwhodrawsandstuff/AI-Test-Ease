@@ -1,26 +1,21 @@
-// Check if the content script has already been initialized on this page
 if (typeof window.aiTestEaseInitialized === "undefined") {
-  // Mark as initialized to prevent duplicate initialization
   window.aiTestEaseInitialized = true;
 
-  // Create namespace for our extension state
   window.aiTestEaseState = {
     isRecording: false,
     interactions: [],
-    eventHandlers: {}, // Store event handlers so we can remove them later
-    lastUrl: window.location.href, // Track URL for navigation events
+    eventHandlers: {},
+    lastUrl: window.location.href,
   };
 
   console.log(
     "AI Test Ease content script initialized - waiting for recording to start"
   );
 
-  // Check recording state and get stored interactions if recording is active
   chrome.runtime.sendMessage({ action: "getRecordingState" }, (response) => {
     if (response && response.isRecording) {
       console.log("Detected active recording session");
 
-      // Record page load as a navigation interaction
       const pageLoadInteraction = {
         type: "navigation",
         timestamp: new Date().toISOString(),
@@ -31,26 +26,23 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         description: `Navigate to "${document.title || window.location.href}"`,
         expectedResult: "Page should load successfully",
         element: {
-          tagName: "PAGE", // Add tagName for navigation events
-          xpath: "/html/body", // Use body as default xpath
-          type: "navigation", // Add type identifier
+          tagName: "PAGE",
+          xpath: "/html/body",
+          type: "navigation",
         },
       };
 
-      // Store this navigation interaction
       chrome.runtime.sendMessage(
         { action: "storeInteractions", interactions: [pageLoadInteraction] },
         (storeResponse) => {
           console.log("Navigation event stored:", storeResponse);
 
-          // Start recording on this page since we're in active recording
           startRecording();
         }
       );
     }
   });
 
-  // Event handler for clicks
   function handleClick(event) {
     try {
       const target = event.target;
@@ -64,7 +56,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
           className: target.className,
           innerText: target.innerText?.substring(0, 100),
           xpath: getXPath(target),
-          // Additional properties useful for test automation
           name: target.name || "",
           value: target.value || "",
           type: target.type || "",
@@ -73,22 +64,18 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
           testId: target.getAttribute("data-testid") || "",
         },
         url: window.location.href,
-        // Add page title which helps in documentation
         pageTitle: document.title,
-        // Add suggested step description
         description: `Click on ${
           target.innerText
             ? `"${target.innerText.substring(0, 30)}"`
             : target.tagName.toLowerCase()
         }`,
-        // Add suggested expected result
         expectedResult: "Element should respond to click action",
       };
 
       window.aiTestEaseState.interactions.push(interaction);
       console.log("Interaction recorded:", interaction.type);
 
-      // Store each interaction immediately in chrome.storage.local
       chrome.runtime.sendMessage(
         { action: "storeInteractions", interactions: [interaction] },
         (response) => {
@@ -102,7 +89,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     }
   }
 
-  // Event handler for input focus
   function handleFocus(event) {
     if (event.target.tagName !== "INPUT") return;
 
@@ -128,7 +114,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       window.aiTestEaseState.interactions.push(interaction);
       console.log("Interaction recorded:", interaction.type);
 
-      // Store each interaction immediately
       chrome.runtime.sendMessage(
         { action: "storeInteractions", interactions: [interaction] },
         (response) => {
@@ -142,13 +127,11 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     }
   }
 
-  // Function to check for URL changes (page navigation)
   function checkForNavigation() {
     if (!window.aiTestEaseState.isRecording) return;
 
     const currentUrl = window.location.href;
     if (currentUrl !== window.aiTestEaseState.lastUrl) {
-      // URL has changed, record a navigation interaction
       const interaction = {
         type: "navigation",
         timestamp: new Date().toISOString(),
@@ -159,9 +142,9 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         description: `Navigate to "${document.title || currentUrl}"`,
         expectedResult: "Page should load successfully",
         element: {
-          tagName: "PAGE", // Add tagName for navigation events
-          xpath: "/html/body", // Use body as default xpath
-          type: "navigation", // Add type identifier
+          tagName: "PAGE",
+          xpath: "/html/body",
+          type: "navigation",
         },
       };
 
@@ -169,7 +152,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       window.aiTestEaseState.lastUrl = currentUrl;
       console.log("Navigation recorded:", interaction.description);
 
-      // Store the navigation interaction
       chrome.runtime.sendMessage(
         { action: "storeInteractions", interactions: [interaction] },
         (response) => {
@@ -181,9 +163,7 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     }
   }
 
-  // Function to format interactions for test automation
   function formatInteractionsForTestAutomation(interactions) {
-    // Prepare the data specifically for test automation
     const headers = [
       "Step #",
       "Test Case ID",
@@ -198,13 +178,11 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       "Timestamp",
     ];
 
-    // Group interactions into test cases (each page/URL could be a separate test case)
     let testCaseId = 1;
     let currentUrl = "";
     let stepNumber = 1;
 
     const rows = interactions.map((interaction, index) => {
-      // If URL changes, consider it a new test case
       if (currentUrl !== interaction.url) {
         currentUrl = interaction.url;
         testCaseId++;
@@ -213,10 +191,8 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         stepNumber++;
       }
 
-      // Ensure element exists
       const element = interaction.element || {};
 
-      // Determine the best element identifier (prioritize ID, then name, etc.)
       let elementIdentifier = "";
       if (element.id) {
         elementIdentifier = `id=${element.id}`;
@@ -252,17 +228,14 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     return { headers, rows };
   }
 
-  // Function to start recording (attach event listeners)
   function startRecording() {
     console.log("Starting recording - attaching event listeners");
     window.aiTestEaseState.isRecording = true;
     window.aiTestEaseState.lastUrl = window.location.href;
 
-    // Attach event listeners and store references to them
     document.addEventListener("click", handleClick);
     document.addEventListener("focus", handleFocus, true);
 
-    // Set up a MutationObserver to detect DOM changes which might indicate navigation
     const observer = new MutationObserver(() => {
       checkForNavigation();
     });
@@ -273,10 +246,8 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       attributes: false,
     });
 
-    // Also check for navigation periodically
     const navigationInterval = setInterval(checkForNavigation, 1000);
 
-    // Store references to the handlers
     window.aiTestEaseState.eventHandlers = {
       click: handleClick,
       focus: handleFocus,
@@ -285,12 +256,10 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     };
   }
 
-  // Function to stop recording (remove event listeners)
   function stopRecording() {
     console.log("Stopping recording - removing event listeners");
     window.aiTestEaseState.isRecording = false;
 
-    // Remove event listeners
     if (window.aiTestEaseState.eventHandlers.click) {
       document.removeEventListener(
         "click",
@@ -306,21 +275,17 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       );
     }
 
-    // Disconnect the MutationObserver
     if (window.aiTestEaseState.eventHandlers.observer) {
       window.aiTestEaseState.eventHandlers.observer.disconnect();
     }
 
-    // Clear the navigation check interval
     if (window.aiTestEaseState.eventHandlers.navigationInterval) {
       clearInterval(window.aiTestEaseState.eventHandlers.navigationInterval);
     }
 
-    // Clear event handler references
     window.aiTestEaseState.eventHandlers = {};
   }
 
-  // Listen for messages from popup/background
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       if (message.action === "startRecording") {
@@ -328,8 +293,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         sendResponse({ status: "Recording started" });
       } else if (message.action === "stopRecording") {
         stopRecording();
-        // Send recorded interactions to background script for saving
-        // Only send the interactions from this page - background will combine with stored ones
         chrome.runtime.sendMessage(
           {
             action: "saveInteractions",
@@ -339,9 +302,8 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
             sendResponse({ status: "Recording stopped" });
           }
         );
-        return true; // Will respond asynchronously
+        return true;
       } else if (message.action === "formatInteractions") {
-        // If we need to format interactions outside the extension
         const formatted = formatInteractionsForTestAutomation(
           message.interactions
         );
@@ -353,7 +315,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     }
   });
 
-  // Helper function to get XPath of an element
   function getXPath(element) {
     if (!element) return "";
 
