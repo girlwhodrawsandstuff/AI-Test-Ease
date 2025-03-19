@@ -825,6 +825,7 @@ async function saveToGoogleSheets(interactions) {
   }
 }
 
+// Function to format spreadsheet headers and styling
 async function formatSpreadsheet(spreadsheetId, token) {
   console.log("Formatting spreadsheet headers:", spreadsheetId);
   try {
@@ -1070,6 +1071,36 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   startIndex: 0,
                   endIndex: 8,
                 },
+              },
+            },
+            // Make Test Case Description column (column B) wider
+            {
+              updateDimensionProperties: {
+                range: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 1, // Column B (Test Case Description)
+                  endIndex: 2,
+                },
+                properties: {
+                  pixelSize: 150,
+                },
+                fields: "pixelSize",
+              },
+            },
+            // Make Test Steps column (column C) wider
+            {
+              updateDimensionProperties: {
+                range: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 2, // Column C (Test Steps)
+                  endIndex: 3,
+                },
+                properties: {
+                  pixelSize: 200,
+                },
+                fields: "pixelSize",
               },
             },
           ],
