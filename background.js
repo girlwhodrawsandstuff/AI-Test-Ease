@@ -664,17 +664,14 @@ function getTestCaseName(interactions) {
     return "Untitled Test Case";
   }
 
-  // Get the title of the first page
   let firstPageTitle =
     interactions[0]?.pageTitle ||
     interactions[0]?.element?.tagName ||
     "Unknown Page";
 
-  // Clean up the page title - remove any domain information if present
   firstPageTitle = firstPageTitle.replace(/^https?:\/\/[^\/]+\//, "");
   firstPageTitle = firstPageTitle.replace(/\.[^.]+$/, "");
 
-  // If it's a navigation, try to get a better name from the URL
   if (interactions[0]?.type === "navigation" && interactions[0]?.toUrl) {
     try {
       const url = new URL(interactions[0].toUrl);
@@ -682,7 +679,6 @@ function getTestCaseName(interactions) {
         const pathSegments = url.pathname.split("/").filter(Boolean);
         if (pathSegments.length > 0) {
           const lastSegment = pathSegments[pathSegments.length - 1];
-          // Clean up the segment - replace hyphens with spaces and capitalize
           firstPageTitle = lastSegment
             .replace(/[-_]/g, " ")
             .replace(/\b\w/g, (c) => c.toUpperCase());
@@ -693,7 +689,6 @@ function getTestCaseName(interactions) {
     }
   }
 
-  // Look for significant interactions - try to find form submissions or button clicks
   const significantActions = interactions.filter(
     (i) =>
       i.type === "click" &&
@@ -706,18 +701,15 @@ function getTestCaseName(interactions) {
 
   let actionName = "";
   if (significantActions.length > 0) {
-    // Use the most relevant action text we can find
     actionName =
       significantActions[0].element?.innerText ||
       significantActions[0].description?.replace(/^Click on /i, "") ||
       "Action";
 
-    // Clean up the action name - keep only the first few words
     const actionWords = actionName.split(" ").slice(0, 3).join(" ");
     actionName = actionWords || "Action";
   }
 
-  // Put it all together - create a descriptive name
   if (actionName) {
     return `${firstPageTitle} - ${actionName}`;
   } else {
