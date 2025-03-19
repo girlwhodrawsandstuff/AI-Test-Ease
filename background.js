@@ -230,7 +230,7 @@ async function createSpreadsheet() {
                 title: "Interactions",
                 gridProperties: {
                   frozenRowCount: 1,
-                  columnCount: 7, // Updated for new column structure
+                  columnCount: 9, // Updated for new column structure
                 },
               },
             },
@@ -321,7 +321,7 @@ async function createSpreadsheet() {
                     title: "Interactions",
                     gridProperties: {
                       frozenRowCount: 1,
-                      columnCount: 7, // Updated for new column structure
+                      columnCount: 9, // Updated for new column structure
                     },
                   },
                 },
@@ -433,6 +433,19 @@ async function processInteractionsWithAI(interactions) {
     };
   }
 
+  // Validate that interactions array is valid before proceeding
+  if (
+    !interactions ||
+    !Array.isArray(interactions) ||
+    interactions.length === 0
+  ) {
+    console.error("[AI] Invalid or empty interactions array:", interactions);
+    return {
+      interactions: interactions || [],
+      testCaseName: "User Interaction Test",
+    };
+  }
+
   try {
     console.log("[AI] Starting AI analysis of interactions");
     console.log("[AI] Using backend URL:", AI_CONFIG.backendUrl);
@@ -446,6 +459,22 @@ async function processInteractionsWithAI(interactions) {
 
     // Call our backend service with timeout
     try {
+      // Log the payload we're sending to help debug
+      console.log(
+        "[AI] Sending interactions to backend:",
+        JSON.stringify({
+          interactionCount: interactions.length,
+          sampleInteraction:
+            interactions.length > 0
+              ? {
+                  type: interactions[0].type,
+                  url: interactions[0].url,
+                  hasElement: !!interactions[0].element,
+                }
+              : null,
+        })
+      );
+
       const response = await fetch(`${AI_CONFIG.backendUrl}/api/analyze`, {
         method: "POST",
         headers: {
@@ -461,6 +490,15 @@ async function processInteractionsWithAI(interactions) {
       if (!response.ok) {
         const errorData = await response.text();
         console.error("[AI] Backend API error:", errorData);
+
+        // Check specifically for the "No interactions provided" error
+        if (errorData.includes("No interactions provided")) {
+          console.warn(
+            "[AI] Backend reported no interactions, using fallback processing"
+          );
+          throw new Error("No interactions provided to backend");
+        }
+
         throw new Error(`Backend API error: ${errorData}`);
       }
 
@@ -581,6 +619,18 @@ async function saveToGoogleSheets(interactions) {
   console.log("Saving interactions:", interactions);
 
   try {
+    // Validate that interactions exist and are non-empty
+    if (
+      !interactions ||
+      !Array.isArray(interactions) ||
+      interactions.length === 0
+    ) {
+      console.error("[Sheets] No interactions to save:", interactions);
+      throw new Error(
+        "No interactions to save. Please record some actions first."
+      );
+    }
+
     // Process interactions with AI if enabled
     const processedData = await processInteractionsWithAI(interactions);
     const enhancedInteractions = processedData.interactions;
@@ -617,6 +667,8 @@ async function saveToGoogleSheets(interactions) {
       "Expected Result",
       "Actual Result",
       "Priority",
+      "Tester",
+      "Status",
     ];
 
     // Combine all steps into a numbered list
@@ -652,6 +704,8 @@ async function saveToGoogleSheets(interactions) {
       "",
       expectedResults,
       highestPriority,
+      "", // Tester (empty for user to fill)
+      "Pass", // Status (default to Pass)
     ];
 
     // Add comments explaining each field
@@ -669,7 +723,7 @@ async function saveToGoogleSheets(interactions) {
       : [consolidatedRow];
 
     // Determine where to append data
-    let range = needsHeaders ? "Interactions!A1" : "Interactions!A:G";
+    let range = needsHeaders ? "Interactions!A1" : "Interactions!A:I";
 
     // If using an existing spreadsheet, find the next empty row
     if (recordingState.targetSpreadsheetId) {
@@ -702,7 +756,7 @@ async function saveToGoogleSheets(interactions) {
       } catch (error) {
         console.error("[Sheets] Error finding next empty row:", error);
         // Fall back to appending
-        range = "Interactions!A:G";
+        range = "Interactions!A:I";
       }
     }
 
@@ -883,7 +937,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   startRowIndex: 0,
                   endRowIndex: 1,
                   startColumnIndex: 0,
-                  endColumnIndex: 7, // 7 columns (A-G)
+                  endColumnIndex: 9, // 9 columns (A-I)
                 },
                 cell: {
                   userEnteredFormat: {
@@ -922,7 +976,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   sheetId: firstSheetId,
                   startRowIndex: 0,
                   startColumnIndex: 0,
-                  endColumnIndex: 7, // All columns
+                  endColumnIndex: 9, // All columns
                 },
                 cell: {
                   userEnteredFormat: {
@@ -1074,7 +1128,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   sheetId: firstSheetId,
                   dimension: "COLUMNS",
                   startIndex: 0,
-                  endIndex: 7,
+                  endIndex: 9,
                 },
               },
             },
@@ -1121,6 +1175,110 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   pixelSize: 250,
                 },
                 fields: "pixelSize",
+              },
+            },
+            // Add dropdown validation for Status column (column I)
+            {
+              setDataValidation: {
+                range: {
+                  sheetId: firstSheetId,
+                  startRowIndex: 1, // Skip header row
+                  startColumnIndex: 8, // Column I (Status)
+                  endColumnIndex: 9,
+                },
+                rule: {
+                  condition: {
+                    type: "ONE_OF_LIST",
+                    values: [
+                      { userEnteredValue: "Pass" },
+                      { userEnteredValue: "Fail" },
+                    ],
+                  },
+                  strict: true,
+                  showCustomUi: true,
+                },
+              },
+            },
+            // Format Pass status with green background
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1, // Start after header row
+                      startColumnIndex: 8, // Status column (I)
+                      endColumnIndex: 9,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "Pass",
+                        },
+                      ],
+                    },
+                    format: {
+                      backgroundColor: {
+                        red: 0.85,
+                        green: 0.95,
+                        blue: 0.85,
+                      },
+                      textFormat: {
+                        bold: true,
+                        foregroundColor: {
+                          red: 0.1,
+                          green: 0.1,
+                          blue: 0.1,
+                        },
+                      },
+                    },
+                  },
+                },
+                index: 3,
+              },
+            },
+            // Format Fail status with red background
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1, // Start after header row
+                      startColumnIndex: 8, // Status column (I)
+                      endColumnIndex: 9,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "Fail",
+                        },
+                      ],
+                    },
+                    format: {
+                      backgroundColor: {
+                        red: 0.92,
+                        green: 0.75,
+                        blue: 0.8,
+                      },
+                      textFormat: {
+                        bold: true,
+                        foregroundColor: {
+                          red: 0.8,
+                          green: 0.0,
+                          blue: 0.0,
+                        },
+                      },
+                    },
+                  },
+                },
+                index: 4,
               },
             },
           ],
