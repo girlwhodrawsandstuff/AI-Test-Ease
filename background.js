@@ -27,7 +27,7 @@ let recordingState = {
 // Configuration for AI integration
 const AI_CONFIG = {
   enabled: true, // AI processing is enabled by default
-  backendUrl: "http://localhost:5000", // URL to your backend service
+  backendUrl: "http://localhost:5000", // Fixed URL to the backend service
 };
 
 // Handle messages from content script and popup
@@ -607,22 +607,18 @@ async function processInteractionsWithAI(interactions) {
   }
 }
 
-// Update in chrome.storage when AI settings change
+// Update in chrome.storage when AI settings change - only track aiEnabled
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === "sync") {
     if (changes.aiEnabled) {
       AI_CONFIG.enabled = changes.aiEnabled.newValue;
     }
-    if (changes.backendUrl) {
-      AI_CONFIG.backendUrl = changes.backendUrl.newValue;
-    }
   }
 });
 
-// Initialize AI settings from storage
-chrome.storage.sync.get(["aiEnabled", "backendUrl"], (result) => {
+// Initialize AI settings from storage - only get aiEnabled
+chrome.storage.sync.get(["aiEnabled"], (result) => {
   if (result.aiEnabled !== undefined) AI_CONFIG.enabled = result.aiEnabled;
-  if (result.backendUrl) AI_CONFIG.backendUrl = result.backendUrl;
 });
 
 // Modify the saveToGoogleSheets function to use AI

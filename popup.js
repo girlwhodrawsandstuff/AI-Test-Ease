@@ -9,7 +9,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // AI Configuration elements
   const aiEnabledCheckbox = document.getElementById("aiEnabled");
   const aiSettingsDiv = document.getElementById("aiSettings");
-  const backendUrlInput = document.getElementById("backendUrl");
   const testerNameInput = document.getElementById("testerName");
 
   // Explicit debugging of initial element states
@@ -29,15 +28,9 @@ document.addEventListener("DOMContentLoaded", () => {
   );
 
   // Load saved AI settings or use defaults
-  chrome.storage.sync.get(["aiEnabled", "backendUrl"], (result) => {
+  chrome.storage.sync.get(["aiEnabled"], (result) => {
     // Default to enabled if not set
     const isEnabled = result.aiEnabled !== undefined ? result.aiEnabled : true;
-
-    if (result.backendUrl) {
-      backendUrlInput.value = result.backendUrl;
-    } else {
-      backendUrlInput.value = "http://localhost:5000";
-    }
 
     aiEnabledCheckbox.checked = isEnabled;
     aiSettingsDiv.classList.toggle("hidden", !isEnabled);
@@ -57,11 +50,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Save setting to storage
     chrome.storage.sync.set({ aiEnabled: isEnabled });
-  });
-
-  // Save backend URL when it changes
-  backendUrlInput.addEventListener("change", () => {
-    chrome.storage.sync.set({ backendUrl: backendUrlInput.value });
   });
 
   // Save tester name when it changes
@@ -86,7 +74,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       spreadsheetUrlInput.disabled = true;
       aiEnabledCheckbox.disabled = true;
-      backendUrlInput.disabled = true;
       testerNameInput.disabled = true;
     } else {
       startButton.textContent = "Start Recording";
@@ -103,7 +90,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       spreadsheetUrlInput.disabled = false;
       aiEnabledCheckbox.disabled = false;
-      backendUrlInput.disabled = false;
       testerNameInput.disabled = false;
     }
   }
