@@ -619,8 +619,6 @@ async function saveToGoogleSheets(interactions) {
       "Priority",
     ];
 
-    // Condense all interactions into a single test case row
-
     // Combine all steps into a numbered list
     const testSteps = enhancedInteractions
       .map(
@@ -647,14 +645,23 @@ async function saveToGoogleSheets(interactions) {
 
     // Create a single consolidated row
     const consolidatedRow = [
-      testCaseName, // Module/Feature now contains test case name
-      `End-to-end test for ${testCaseName}`, // More descriptive test case description
-      testSteps, // All steps combined with numbering
-      "", // Test Data (empty for now)
-      expectedResults, // All expected results combined
-      "", // Actual Result (empty, to be filled during test execution)
-      highestPriority, // Use highest priority found
+      testCaseName,
+      `${testCaseName}`,
+      testSteps,
+      "",
+      "",
+      expectedResults,
+      highestPriority,
     ];
+
+    // Add comments explaining each field
+    // consolidatedRow[0] = Module/Feature (test case name)
+    // consolidatedRow[1] = Test Case Description
+    // consolidatedRow[2] = Test Steps (all steps combined with numbering)
+    // consolidatedRow[3] = Test Data (empty for now)
+    // consolidatedRow[4] = Expected Result (empty for manual filling)
+    // consolidatedRow[5] = Actual Result (filled with AI-generated expected results)
+    // consolidatedRow[6] = Priority (highest priority found)
 
     // Add headers if this is a new spreadsheet
     const values = needsHeaders
