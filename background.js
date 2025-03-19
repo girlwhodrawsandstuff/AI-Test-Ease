@@ -230,7 +230,7 @@ async function createSpreadsheet() {
                 title: "Interactions",
                 gridProperties: {
                   frozenRowCount: 1,
-                  columnCount: 8, // Updated for new column structure
+                  columnCount: 7, // Updated for new column structure
                 },
               },
             },
@@ -321,7 +321,7 @@ async function createSpreadsheet() {
                     title: "Interactions",
                     gridProperties: {
                       frozenRowCount: 1,
-                      columnCount: 8, // Updated for new column structure
+                      columnCount: 7, // Updated for new column structure
                     },
                   },
                 },
@@ -616,7 +616,6 @@ async function saveToGoogleSheets(interactions) {
       "Test Data",
       "Expected Result",
       "Actual Result",
-      "Severity",
       "Priority",
     ];
 
@@ -654,7 +653,6 @@ async function saveToGoogleSheets(interactions) {
       "", // Test Data (empty for now)
       expectedResults, // All expected results combined
       "", // Actual Result (empty, to be filled during test execution)
-      "", // Severity (empty for now)
       highestPriority, // Use highest priority found
     ];
 
@@ -664,7 +662,7 @@ async function saveToGoogleSheets(interactions) {
       : [consolidatedRow];
 
     // Determine where to append data
-    let range = needsHeaders ? "Interactions!A1" : "Interactions!A:H";
+    let range = needsHeaders ? "Interactions!A1" : "Interactions!A:G";
 
     // If using an existing spreadsheet, find the next empty row
     if (recordingState.targetSpreadsheetId) {
@@ -697,7 +695,7 @@ async function saveToGoogleSheets(interactions) {
       } catch (error) {
         console.error("[Sheets] Error finding next empty row:", error);
         // Fall back to appending
-        range = "Interactions!A:H";
+        range = "Interactions!A:G";
       }
     }
 
@@ -878,7 +876,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   startRowIndex: 0,
                   endRowIndex: 1,
                   startColumnIndex: 0,
-                  endColumnIndex: 8, // 8 columns (A-H)
+                  endColumnIndex: 7, // 7 columns (A-G)
                 },
                 cell: {
                   userEnteredFormat: {
@@ -917,7 +915,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   sheetId: firstSheetId,
                   startRowIndex: 0,
                   startColumnIndex: 0,
-                  endColumnIndex: 8, // All columns
+                  endColumnIndex: 7, // All columns
                 },
                 cell: {
                   userEnteredFormat: {
@@ -935,8 +933,8 @@ async function formatSpreadsheet(spreadsheetId, token) {
                     {
                       sheetId: firstSheetId,
                       startRowIndex: 1, // Start after header row
-                      startColumnIndex: 7, // Priority column (H)
-                      endColumnIndex: 8,
+                      startColumnIndex: 6, // Priority column (G)
+                      endColumnIndex: 7,
                     },
                   ],
                   booleanRule: {
@@ -976,8 +974,8 @@ async function formatSpreadsheet(spreadsheetId, token) {
                     {
                       sheetId: firstSheetId,
                       startRowIndex: 1,
-                      startColumnIndex: 7,
-                      endColumnIndex: 8,
+                      startColumnIndex: 6,
+                      endColumnIndex: 7,
                     },
                   ],
                   booleanRule: {
@@ -1017,8 +1015,8 @@ async function formatSpreadsheet(spreadsheetId, token) {
                     {
                       sheetId: firstSheetId,
                       startRowIndex: 1,
-                      startColumnIndex: 7,
-                      endColumnIndex: 8,
+                      startColumnIndex: 6,
+                      endColumnIndex: 7,
                     },
                   ],
                   booleanRule: {
@@ -1069,7 +1067,7 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   sheetId: firstSheetId,
                   dimension: "COLUMNS",
                   startIndex: 0,
-                  endIndex: 8,
+                  endIndex: 7,
                 },
               },
             },
@@ -1099,6 +1097,21 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 },
                 properties: {
                   pixelSize: 200,
+                },
+                fields: "pixelSize",
+              },
+            },
+            // Make Expected Result column (column E) wider
+            {
+              updateDimensionProperties: {
+                range: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 4, // Column E (Expected Result)
+                  endIndex: 5,
+                },
+                properties: {
+                  pixelSize: 250,
                 },
                 fields: "pixelSize",
               },
