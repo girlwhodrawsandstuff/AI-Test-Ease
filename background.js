@@ -897,6 +897,30 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 fields: "userEnteredFormat.wrapStrategy",
               },
             },
+            // Add dropdown for priority column (column H - index 7)
+            {
+              setDataValidation: {
+                range: {
+                  sheetId: firstSheetId,
+                  startRowIndex: 1, // Start after header
+                  endRowIndex: 1000, // Apply to many rows
+                  startColumnIndex: 7, // Priority column (H)
+                  endColumnIndex: 8,
+                },
+                rule: {
+                  condition: {
+                    type: "ONE_OF_LIST",
+                    values: [
+                      { userEnteredValue: "P1" },
+                      { userEnteredValue: "P2" },
+                      { userEnteredValue: "P3" },
+                    ],
+                  },
+                  showCustomUi: true,
+                  strict: false,
+                },
+              },
+            },
             // Format priority column with color coding - P1 (high priority)
             {
               addConditionalFormatRule: {
@@ -1053,7 +1077,9 @@ async function formatSpreadsheet(spreadsheetId, token) {
       throw new Error(`Failed to format spreadsheet: ${error}`);
     }
 
-    console.log("Spreadsheet formatted successfully with updated styling");
+    console.log(
+      "Spreadsheet formatted successfully with dropdown options and styling"
+    );
   } catch (error) {
     console.error("[Sheets] Error formatting spreadsheet:", error);
     // Don't rethrow the error - treat formatting errors as non-fatal
