@@ -7,7 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const statusDiv = document.getElementById("status");
 
   const aiEnabledCheckbox = document.getElementById("aiEnabled");
-  const aiSettingsDiv = document.getElementById("aiSettings");
+  const aiSettingsDiv = document.querySelector(".ai-config");
   const testerNameInput = document.getElementById("testerName");
 
   console.log("Initial DOM elements:", {
@@ -28,7 +28,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const isEnabled = result.aiEnabled !== undefined ? result.aiEnabled : true;
 
     aiEnabledCheckbox.checked = isEnabled;
-    aiSettingsDiv.classList.toggle("hidden", !isEnabled);
+    if (aiSettingsDiv) {
+      aiSettingsDiv.classList.toggle("hidden", !isEnabled);
+    }
   });
 
   chrome.storage.sync.get(["testerName"], (result) => {
@@ -39,7 +41,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   aiEnabledCheckbox.addEventListener("change", () => {
     const isEnabled = aiEnabledCheckbox.checked;
-    aiSettingsDiv.classList.toggle("hidden", !isEnabled);
+    if (aiSettingsDiv) {
+      aiSettingsDiv.classList.toggle("hidden", !isEnabled);
+    }
 
     chrome.storage.sync.set({ aiEnabled: isEnabled });
   });
