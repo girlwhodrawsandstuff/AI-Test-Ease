@@ -89,44 +89,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     }
   }
 
-  function handleFocus(event) {
-    if (event.target.tagName !== "INPUT") return;
-
-    try {
-      const target = event.target;
-
-      const interaction = {
-        type: "focus",
-        timestamp: new Date().toISOString(),
-        element: {
-          tagName: target.tagName,
-          id: target.id,
-          className: target.className,
-          placeholder: target.placeholder,
-          xpath: getXPath(target),
-        },
-        url: window.location.href,
-        pageTitle: document.title,
-        description: `Focus on ${target.tagName.toLowerCase()} element`,
-        expectedResult: "Element should receive focus",
-      };
-
-      window.aiTestEaseState.interactions.push(interaction);
-      console.log("Interaction recorded:", interaction.type);
-
-      chrome.runtime.sendMessage(
-        { action: "storeInteractions", interactions: [interaction] },
-        (response) => {
-          if (!response || response.status !== "success") {
-            console.error("Failed to store interaction:", response);
-          }
-        }
-      );
-    } catch (error) {
-      console.error("Error recording focus:", error);
-    }
-  }
-
   function checkForNavigation() {
     if (!window.aiTestEaseState.isRecording) return;
 
@@ -350,7 +312,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     window.aiTestEaseState.inputValues = {};
 
     document.addEventListener("click", handleClick);
-    document.addEventListener("focus", handleFocus, true);
     document.addEventListener("input", handleInput);
 
     const observer = new MutationObserver(() => {
@@ -367,7 +328,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
 
     window.aiTestEaseState.eventHandlers = {
       click: handleClick,
-      focus: handleFocus,
       input: handleInput,
       observer: observer,
       navigationInterval: navigationInterval,
@@ -390,14 +350,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       document.removeEventListener(
         "click",
         window.aiTestEaseState.eventHandlers.click
-      );
-    }
-
-    if (window.aiTestEaseState.eventHandlers.focus) {
-      document.removeEventListener(
-        "focus",
-        window.aiTestEaseState.eventHandlers.focus,
-        true
       );
     }
 
