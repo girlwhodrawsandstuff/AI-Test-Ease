@@ -1,0 +1,24 @@
+{
+    "manifest_version": 3,
+    "name": "Puppeteer AI Test Documenter",
+    "version": "1.0",
+    "description": "Records user actions and generates human-readable test documentation using AI",
+    "permissions": ["scripting", "activeTab", "storage", "downloads"],
+    "host_permissions": ["https://api.openai.com/*"],
+    "action": {
+      "default_popup": "popup.html",
+      "default_icon": {
+        "16": "images/icon16.png",
+        "32": "images/icon32.png"
+      }
+    },
+    "background": {
+      "service_worker": "background.js"
+    },
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["content.js"]
+      }
+    ]
+  }

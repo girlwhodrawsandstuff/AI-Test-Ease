@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      width: 320px;
+      padding: 10px;
+      font-family: Arial, sans-serif;
+    }
+    button {
+      margin: 5px;
+      padding: 8px;
+      width: 100%;
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #3367d6;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    #status {
+      margin-top: 10px;
+      color: #4285f4;
+      font-weight: bold;
+    }
+    .input-group {
+      margin-bottom: 10px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+    }
+    input {
+      width: 95%;
+      padding: 5px;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h2>AI Test Case Documenter</h2>
+  
+  <div class="input-group">
+    <label for="testName">Test Name:</label>
+    <input type="text" id="testName" placeholder="Enter test case name">
+  </div>
+  
+  <div class="input-group">
+    <label for="testDescription">Test Description:</label>
+    <input type="text" id="testDescription" placeholder="Enter test description">
+  </div>
+  
+  <button id="startRecording">Start Recording</button>
+  <button id="stopRecording" disabled>Stop Recording</button>
+  <button id="generateDocs" disabled>Generate Documentation</button>
+  <button id="downloadDocs" disabled>Download Documentation</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
