@@ -29,6 +29,9 @@ const AI_CONFIG = {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "startRecording") {
     chrome.storage.local.set({ interactions: [] });
+    chrome.storage.local.remove(["interactions", "tempInteractions"], () => {
+      console.log("[Recording] All recording data cleared");
+    });
 
     if (!sender.tab) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -79,6 +82,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const allInteractions = result.interactions || [];
 
       if (message.interactions && message.interactions.length > 0) {
+        console.log(message.interactions);
         saveToGoogleSheets(message.interactions)
           .then(() => {
             sendResponse({ status: "success", url: spreadsheetUrl });
@@ -516,7 +520,7 @@ async function processInteractionsWithAI(interactions) {
               : null,
         })
       );
-
+      console.log("cleanedInteractions", cleanedInteractions);
       const response = await fetch(`${AI_CONFIG.backendUrl}/api/analyze`, {
         method: "POST",
         headers: {
@@ -558,18 +562,14 @@ async function processInteractionsWithAI(interactions) {
 
       console.log("[AI] AI analysis complete:", aiResponse);
 
-      const enhancedInteractions = cleanedInteractions.map(
+      const enhancedInteractions = aiResponse.interactions.map(
         (interaction, index) => {
-          if (index < aiResponse.interactions.length) {
-            return {
-              ...interaction,
-              aiActionDescription:
-                aiResponse.interactions[index].actionDescription,
-              aiExpectedResult: aiResponse.interactions[index].expectedResult,
-              aiPriority: aiResponse.interactions[index].priority,
-            };
-          }
-          return interaction;
+          return {
+            aiActionDescription: interaction.actionDescription,
+            aiExpectedResult: interaction.expectedResult,
+            aiActualResult: interaction.actualResult,
+            aiPriority: interaction.priority,
+          };
         }
       );
 
@@ -620,6 +620,7 @@ function fallbackProcessing(interactions) {
       aiActionDescription: interaction.description || `${interaction.type}`,
       aiExpectedResult:
         interaction.expectedResult || "Action should complete successfully",
+      aiActualResult: "Action was completed successfully",
       aiPriority: "P2",
     })),
     testCaseName,
@@ -627,8 +628,6 @@ function fallbackProcessing(interactions) {
 }
 
 async function saveToGoogleSheets(interactions) {
-  console.log("Saving interactions:", interactions);
-
   try {
     if (
       !interactions ||
@@ -643,10 +642,9 @@ async function saveToGoogleSheets(interactions) {
 
     const aiResult = await processInteractionsWithAI(interactions);
     const enhancedInteractions = aiResult.interactions;
+    console.log("enhancedinteraction", enhancedInteractions);
 
     const testCaseName = aiResult.testCaseName ?? "Fallback test name";
-
-    console.log("[Sheets] Using test case name:", testCaseName);
 
     const token = await getAccessToken();
     if (!token) {
@@ -676,7 +674,10 @@ async function saveToGoogleSheets(interactions) {
     ];
 
     const testSteps = enhancedInteractions
-      .map((interaction, index) => formatTestStep(interaction, index + 1))
+      .map(
+        (interaction, index) =>
+          `${index + 1}. ${interaction.aiActionDescription}`
+      )
       .filter((step) => step)
       .join("\n");
 
@@ -684,6 +685,12 @@ async function saveToGoogleSheets(interactions) {
       .map(
         (interaction) =>
           interaction.expectedResult || "Action should complete successfully"
+      )
+      .join("\n");
+
+    const actualResults = enhancedInteractions
+      .map(
+        (interaction) => interaction.aiActualResult || "Action was completed"
       )
       .join("\n");
 
@@ -702,8 +709,8 @@ async function saveToGoogleSheets(interactions) {
       `${testCaseName}`,
       testSteps,
       "",
-      "",
       expectedResults,
+      actualResults,
       "P1",
       formatTesterName(recordingState.testerName),
       "Pass",
