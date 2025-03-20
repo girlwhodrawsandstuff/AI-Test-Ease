@@ -1,4 +1,3 @@
-// Add error handler for uncaught errors
 self.onerror = function (message, source, lineno, colno, error) {
   console.error("[Background] Uncaught error:", {
     message,
@@ -10,7 +9,6 @@ self.onerror = function (message, source, lineno, colno, error) {
   return false;
 };
 
-// Add error handler for unhandled promise rejections
 self.onunhandledrejection = function (event) {
   console.error("[Background] Unhandled promise rejection:", event.reason);
 };
@@ -20,30 +18,35 @@ let spreadsheetUrl = null;
 let recordingState = {
   isRecording: false,
   tabId: null,
-  targetSpreadsheetId: null, // Store spreadsheet ID from user input
+  targetSpreadsheetId: null,
+  testerName: "",
 };
 
-// Configuration for AI integration
 const AI_CONFIG = {
-  enabled: true, // AI processing is enabled by default
-  backendUrl: "http://localhost:5000", // URL to your backend service
+  backendUrl: "http://localhost:5000",
 };
 
-// Handle messages from content script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "startRecording") {
-    // Get the current active tab if sender.tab is not available
+    chrome.storage.local.set({ interactions: [] });
+    chrome.storage.local.remove(["interactions", "tempInteractions"], () => {
+      console.log("[Recording] All recording data cleared");
+    });
+
     if (!sender.tab) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs && tabs[0]) {
           recordingState.isRecording = true;
           recordingState.tabId = tabs[0].id;
 
-          // Store spreadsheet ID if provided
           if (message.spreadsheetId) {
             recordingState.targetSpreadsheetId = message.spreadsheetId;
           } else {
             recordingState.targetSpreadsheetId = null;
+          }
+
+          if (message.testerName) {
+            recordingState.testerName = message.testerName;
           }
 
           sendResponse({ status: "Recording started" });
@@ -51,46 +54,89 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ status: "error", error: "No active tab found" });
         }
       });
-      return true; // Will respond asynchronously
+      return true;
     }
 
     recordingState.isRecording = true;
     recordingState.tabId = sender.tab.id;
 
-    // Store spreadsheet ID if provided
     if (message.spreadsheetId) {
       recordingState.targetSpreadsheetId = message.spreadsheetId;
     } else {
       recordingState.targetSpreadsheetId = null;
     }
 
+    if (message.testerName) {
+      recordingState.testerName = message.testerName;
+    }
+
     sendResponse({ status: "Recording started" });
   } else if (message.action === "stopRecording") {
     recordingState.isRecording = false;
     recordingState.tabId = null;
-    // We keep the targetSpreadsheetId intact for the saveInteractions call
     sendResponse({ status: "Recording stopped" });
   } else if (message.action === "getRecordingState") {
     sendResponse(recordingState);
   } else if (message.action === "saveInteractions") {
-    saveToGoogleSheets(message.interactions)
-      .then(() => {
-        sendResponse({ status: "success", url: spreadsheetUrl });
-      })
-      .catch((error) => {
-        console.error("Error saving interactions:", error);
-        sendResponse({ status: "error", error: error.message });
-      });
-    return true; // Will respond asynchronously
+    chrome.storage.local.get(["interactions"], (result) => {
+      const allInteractions = result.interactions || [];
+
+      if (message.interactions && message.interactions.length > 0) {
+        console.log(message.interactions);
+        saveToGoogleSheets(message.interactions)
+          .then(() => {
+            sendResponse({ status: "success", url: spreadsheetUrl });
+            chrome.storage.local.remove("interactions");
+          })
+          .catch((error) => {
+            console.error("Error saving interactions:", error);
+            sendResponse({ status: "error", error: error.message });
+          });
+      } else {
+        console.log(
+          "No new interactions, using stored interactions:",
+          allInteractions.length
+        );
+        saveToGoogleSheets(allInteractions)
+          .then(() => {
+            sendResponse({ status: "success", url: spreadsheetUrl });
+            chrome.storage.local.remove("interactions");
+          })
+          .catch((error) => {
+            console.error("Error saving interactions:", error);
+            sendResponse({ status: "error", error: error.message });
+          });
+      }
+    });
+    return true;
   } else if (message.action === "getSpreadsheetInfo") {
     sendResponse({ url: spreadsheetUrl });
+  } else if (message.action === "storeInteractions") {
+    chrome.storage.local.get(["interactions"], (result) => {
+      const existingInteractions = result.interactions || [];
+      const newInteractions = [
+        ...existingInteractions,
+        ...message.interactions,
+      ];
+
+      chrome.storage.local.set({ interactions: newInteractions }, () => {
+        console.log(
+          `Stored ${message.interactions.length} interactions, total: ${newInteractions.length}`
+        );
+        sendResponse({ status: "success" });
+      });
+    });
+    return true;
+  } else if (message.action === "getStoredInteractions") {
+    chrome.storage.local.get(["interactions"], (result) => {
+      sendResponse({ interactions: result.interactions || [] });
+    });
+    return true;
   }
 });
 
-// Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (recordingState.isRecording && recordingState.tabId === tabId) {
-    // If the tab is being updated and we're recording, ensure content script is injected
     chrome.scripting
       .executeScript({
         target: { tabId },
@@ -107,16 +153,12 @@ async function getAccessToken() {
     const clientId =
       "142180159372-4tltf1eevavn3btkgl7kmvnru3qrl7ll.apps.googleusercontent.com";
 
-    // chrome.identity.getAuthToken returns the token via callback, not directly
-    // We need to wrap it in a Promise
     const getToken = (interactive) => {
       return new Promise((resolve, reject) => {
         chrome.identity.getAuthToken(
           {
             interactive: interactive,
             scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-            // The client_id is already specified in the manifest.json and doesn't need to be
-            // explicitly provided here, but logging for verification
           },
           (token) => {
             if (chrome.runtime.lastError) {
@@ -133,7 +175,6 @@ async function getAccessToken() {
       });
     };
 
-    // First try to get token without interactive prompt
     let token;
     try {
       token = await getToken(false);
@@ -141,7 +182,6 @@ async function getAccessToken() {
       console.log("[Auth] Failed to get non-interactive token:", e);
     }
 
-    // If no token, try with interactive prompt
     if (!token) {
       token = await getToken(true);
     }
@@ -150,14 +190,12 @@ async function getAccessToken() {
       throw new Error("Failed to get auth token");
     }
 
-    // Verify the token is valid by making a test request
     const testResponse = await fetch(
       "https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=" +
         token
     );
 
     if (!testResponse.ok) {
-      // Revoke the current token
       await new Promise((resolve, reject) => {
         chrome.identity.removeCachedAuthToken({ token }, () => {
           if (chrome.runtime.lastError) {
@@ -172,7 +210,6 @@ async function getAccessToken() {
         });
       });
 
-      // Get a new token
       token = await getToken(true);
     }
 
@@ -185,7 +222,6 @@ async function getAccessToken() {
 
 async function createSpreadsheet() {
   try {
-    // Check if we should use an existing spreadsheet
     if (recordingState.targetSpreadsheetId) {
       console.log(
         `[Sheets] Using existing spreadsheet: ${recordingState.targetSpreadsheetId}`
@@ -193,7 +229,6 @@ async function createSpreadsheet() {
       spreadsheetId = recordingState.targetSpreadsheetId;
       spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
 
-      // Verify spreadsheet exists and is accessible
       const token = await getAccessToken();
       if (!token) {
         throw new Error("Failed to get auth token");
@@ -201,7 +236,6 @@ async function createSpreadsheet() {
 
       await verifySpreadsheetAccess(spreadsheetId, token);
 
-      // Don't try to format an existing spreadsheet - it likely already has headers
       return spreadsheetId;
     }
 
@@ -230,7 +264,7 @@ async function createSpreadsheet() {
                 title: "Interactions",
                 gridProperties: {
                   frozenRowCount: 1,
-                  columnCount: 8, // Updated for new column structure
+                  columnCount: 9,
                 },
               },
             },
@@ -254,13 +288,11 @@ async function createSpreadsheet() {
         errorData
       );
 
-      // If token is expired, refresh it and try again
       if (errorStatus === 401) {
         console.log(
           "[Sheets] Token expired during spreadsheet creation, refreshing..."
         );
 
-        // Revoke the current token
         await new Promise((resolve, reject) => {
           chrome.identity.removeCachedAuthToken({ token }, () => {
             if (chrome.runtime.lastError) {
@@ -275,7 +307,6 @@ async function createSpreadsheet() {
           });
         });
 
-        // Get a new token with the getToken Promise wrapper
         const getToken = (interactive) => {
           return new Promise((resolve, reject) => {
             chrome.identity.getAuthToken(
@@ -302,7 +333,6 @@ async function createSpreadsheet() {
         const newToken = await getToken(true);
         console.log("[Sheets] Retrying spreadsheet creation with new token");
 
-        // Retry with new token
         const retryResponse = await fetch(
           "https://sheets.googleapis.com/v4/spreadsheets",
           {
@@ -321,7 +351,7 @@ async function createSpreadsheet() {
                     title: "Interactions",
                     gridProperties: {
                       frozenRowCount: 1,
-                      columnCount: 8, // Updated for new column structure
+                      columnCount: 9,
                     },
                   },
                 },
@@ -330,7 +360,6 @@ async function createSpreadsheet() {
           }
         );
 
-        // Check retry response
         if (!retryResponse.ok) {
           const retryError = await retryResponse.text();
           console.error(
@@ -363,13 +392,10 @@ async function createSpreadsheet() {
     spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
     console.log("[Sheets] Spreadsheet created successfully:", spreadsheetUrl);
 
-    // Format the spreadsheet headers for new spreadsheets only
     try {
-      // Add bold formatting to the header row
       await formatSpreadsheet(spreadsheetId, token);
     } catch (error) {
       console.error("[Sheets] Error formatting spreadsheet:", error);
-      // Non-fatal error, we can continue
     }
 
     return spreadsheetId;
@@ -379,7 +405,6 @@ async function createSpreadsheet() {
   }
 }
 
-// New function to verify access to an existing spreadsheet
 async function verifySpreadsheetAccess(spreadsheetId, token) {
   try {
     if (!token) {
@@ -389,7 +414,6 @@ async function verifySpreadsheetAccess(spreadsheetId, token) {
       }
     }
 
-    // Try to get spreadsheet metadata
     const response = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=properties.title`,
       {
@@ -423,44 +447,102 @@ async function verifySpreadsheetAccess(spreadsheetId, token) {
   }
 }
 
-// Function to analyze interactions with AI and generate descriptions and test cases
 async function processInteractionsWithAI(interactions) {
-  if (!AI_CONFIG.enabled) {
-    console.log("[AI] AI processing is disabled");
+  if (
+    !interactions ||
+    !Array.isArray(interactions) ||
+    interactions.length === 0
+  ) {
+    console.error("[AI] Invalid or empty interactions array:", interactions);
     return {
-      interactions: interactions,
+      interactions: interactions || [],
       testCaseName: "User Interaction Test",
     };
   }
+
+  const cleanedInteractions = interactions.map((interaction) => {
+    const cleanInteraction = { ...interaction };
+
+    if (!cleanInteraction.url) {
+      if (cleanInteraction.type === "navigation" && cleanInteraction.toUrl) {
+        cleanInteraction.url = cleanInteraction.toUrl;
+      } else {
+        cleanInteraction.url = "about:blank";
+      }
+    }
+
+    if (!cleanInteraction.element) {
+      cleanInteraction.element = {
+        tagName: interaction.type === "navigation" ? "PAGE" : "UNKNOWN",
+        xpath: "/html/body",
+        type: interaction.type,
+      };
+    } else {
+      if (!cleanInteraction.element.tagName) {
+        cleanInteraction.element.tagName =
+          interaction.type === "navigation" ? "PAGE" : "UNKNOWN";
+      }
+
+      if (!cleanInteraction.element.xpath) {
+        cleanInteraction.element.xpath = "/html/body";
+      }
+
+      if (!cleanInteraction.element.type) {
+        cleanInteraction.element.type = interaction.type;
+      }
+    }
+
+    return cleanInteraction;
+  });
 
   try {
     console.log("[AI] Starting AI analysis of interactions");
     console.log("[AI] Using backend URL:", AI_CONFIG.backendUrl);
 
-    // Add timeout to prevent hanging on connection issues
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
       console.error("[AI] Request timed out after 20 seconds");
     }, 20000);
 
-    // Call our backend service with timeout
     try {
+      console.log(
+        "[AI] Sending interactions to backend:",
+        JSON.stringify({
+          interactionCount: cleanedInteractions.length,
+          sampleInteraction:
+            cleanedInteractions.length > 0
+              ? {
+                  type: cleanedInteractions[0].type,
+                  url: cleanedInteractions[0].url,
+                  hasElement: !!cleanedInteractions[0].element,
+                }
+              : null,
+        })
+      );
+      console.log("cleanedInteractions", cleanedInteractions);
       const response = await fetch(`${AI_CONFIG.backendUrl}/api/analyze`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ interactions }),
+        body: JSON.stringify({ interactions: cleanedInteractions }),
         signal: controller.signal,
       });
 
-      // Clear the timeout since we got a response
       clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorData = await response.text();
         console.error("[AI] Backend API error:", errorData);
+
+        if (errorData.includes("No interactions provided")) {
+          console.warn(
+            "[AI] Backend reported no interactions, using fallback processing"
+          );
+          throw new Error("No interactions provided to backend");
+        }
+
         throw new Error(`Backend API error: ${errorData}`);
       }
 
@@ -480,115 +562,90 @@ async function processInteractionsWithAI(interactions) {
 
       console.log("[AI] AI analysis complete:", aiResponse);
 
-      // Enhance the original interactions with AI-generated content
-      const enhancedInteractions = interactions.map((interaction, index) => {
-        if (index < aiResponse.interactions.length) {
+      const enhancedInteractions = aiResponse.interactions.map(
+        (interaction, index) => {
           return {
-            ...interaction,
-            aiActionDescription:
-              aiResponse.interactions[index].actionDescription,
-            aiExpectedResult: aiResponse.interactions[index].expectedResult,
-            aiPriority: aiResponse.interactions[index].priority,
+            aiActionDescription: interaction.actionDescription,
+            aiExpectedResult: interaction.expectedResult,
+            aiActualResult: interaction.actualResult,
+            aiPriority: interaction.priority,
           };
         }
-        return interaction;
-      });
+      );
 
       return {
         interactions: enhancedInteractions,
-        testCaseName: aiResponse.testCaseName,
+        testCaseName:
+          aiResponse.testCaseName ||
+          aiResponse.title ||
+          "User Interaction Test",
       };
-    } catch (fetchError) {
-      // Clear timeout if fetch failed
-      clearTimeout(timeoutId);
-
-      if (fetchError.name === "AbortError") {
-        console.error("[AI] Request aborted due to timeout");
-        throw new Error(
-          "Backend request timed out. Please check if the server is running."
-        );
+    } catch (error) {
+      if (error.name === "AbortError") {
+        console.error("[AI] Request timed out or was aborted");
+      } else {
+        console.error("[AI] Error processing interactions:", error);
       }
 
-      throw fetchError;
+      return fallbackProcessing(cleanedInteractions);
     }
   } catch (error) {
-    console.error("[AI] Error processing interactions with AI:", error);
-
-    // Create basic fallback data
-    const fallbackInteractions = interactions.map((interaction) => {
-      let actionDesc = `${interaction.type} on ${
-        interaction.element.tagName || "element"
-      }`;
-
-      // Add more context if available
-      if (interaction.element.innerText) {
-        actionDesc += ` with text "${interaction.element.innerText.substring(
-          0,
-          30
-        )}"`;
-      } else if (interaction.element.id) {
-        actionDesc += ` with id "${interaction.element.id}"`;
-      } else if (interaction.element.className) {
-        actionDesc += ` with class "${interaction.element.className}"`;
-      }
-
-      return {
-        ...interaction,
-        aiActionDescription: actionDesc,
-        aiExpectedResult: "The action should complete successfully",
-        aiPriority: "P1",
-      };
-    });
-
-    // Create a test name based on URL if possible
-    let testName = "User Interaction Test";
-    if (interactions.length > 0 && interactions[0].url) {
-      try {
-        const url = new URL(interactions[0].url);
-        testName = `Interaction Test on ${url.hostname}`;
-      } catch (e) {
-        // Use default if URL parsing fails
-      }
-    }
-
-    return {
-      interactions: fallbackInteractions,
-      testCaseName: testName,
-    };
+    console.error("[AI] Error in processInteractionsWithAI:", error);
+    return fallbackProcessing(cleanedInteractions);
   }
 }
 
-// Update in chrome.storage when AI settings change
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === "sync") {
-    if (changes.aiEnabled) {
-      AI_CONFIG.enabled = changes.aiEnabled.newValue;
-    }
-    if (changes.backendUrl) {
-      AI_CONFIG.backendUrl = changes.backendUrl.newValue;
+function fallbackProcessing(interactions) {
+  console.log("[AI] Using fallback processing for interactions");
+
+  let testCaseName = "User Interaction Test";
+  const firstNavigation = interactions.find(
+    (interaction) => interaction.type === "navigation"
+  );
+
+  if (firstNavigation && firstNavigation.pageTitle) {
+    testCaseName = `Test for ${firstNavigation.pageTitle}`;
+  } else if (firstNavigation && firstNavigation.url) {
+    try {
+      const url = new URL(firstNavigation.url);
+      testCaseName = `Test for ${url.hostname}`;
+    } catch (e) {
+      testCaseName = `Test for ${firstNavigation.url.substring(0, 30)}`;
     }
   }
-});
 
-// Initialize AI settings from storage
-chrome.storage.sync.get(["aiEnabled", "backendUrl"], (result) => {
-  if (result.aiEnabled !== undefined) AI_CONFIG.enabled = result.aiEnabled;
-  if (result.backendUrl) AI_CONFIG.backendUrl = result.backendUrl;
-});
+  return {
+    interactions: interactions.map((interaction) => ({
+      ...interaction,
+      aiActionDescription: interaction.description || `${interaction.type}`,
+      aiExpectedResult:
+        interaction.expectedResult || "Action should complete successfully",
+      aiActualResult: "Action was completed successfully",
+      aiPriority: "P2",
+    })),
+    testCaseName,
+  };
+}
 
-// Modify the saveToGoogleSheets function to use AI
 async function saveToGoogleSheets(interactions) {
-  console.log("Saving interactions:", interactions);
-
   try {
-    // Process interactions with AI if enabled
-    const processedData = await processInteractionsWithAI(interactions);
-    const enhancedInteractions = processedData.interactions;
-    const testCaseName = processedData.testCaseName;
+    if (
+      !interactions ||
+      !Array.isArray(interactions) ||
+      interactions.length === 0
+    ) {
+      console.error("[Sheets] No interactions to save:", interactions);
+      throw new Error(
+        "No interactions to save. Please record some actions first."
+      );
+    }
 
-    console.log("[Sheets] Using test case name:", testCaseName);
+    const aiResult = await processInteractionsWithAI(interactions);
+    const enhancedInteractions = aiResult.interactions;
+    console.log("enhancedinteraction", enhancedInteractions);
 
-    // Get access token first - we'll need it throughout the function
+    const testCaseName = aiResult.testCaseName ?? "Fallback test name";
+
     const token = await getAccessToken();
     if (!token) {
       throw new Error("Failed to get auth token");
@@ -602,13 +659,8 @@ async function saveToGoogleSheets(interactions) {
       throw new Error("Failed to create or get spreadsheet");
     }
 
-    // Check if we need to add headers (only for new spreadsheets)
     let needsHeaders = !recordingState.targetSpreadsheetId;
 
-    // Generate a unique Test Case ID for this recording session
-    const testCaseId = `TC${String(Date.now()).substr(-6)}`;
-
-    // Prepare the data with the new format
     const headers = [
       "Module/Feature",
       "Test Case Description",
@@ -616,28 +668,60 @@ async function saveToGoogleSheets(interactions) {
       "Test Data",
       "Expected Result",
       "Actual Result",
-      "Severity",
       "Priority",
+      "Tester",
+      "Status",
     ];
 
-    const rows = enhancedInteractions.map((interaction) => [
-      "", // Module/Feature (empty for now)
-      testCaseName, // Test Case Description
-      interaction.aiActionDescription || "", // Test Steps
-      "", // Test Data (empty for now)
-      interaction.aiExpectedResult || "", // Expected Result
-      interaction.aiActualResult || "", // Actual Result
-      "", // Severity (empty for now)
-      interaction.aiPriority || "P1", // Priority from AI or default P1
-    ]);
+    const testSteps = enhancedInteractions
+      .map(
+        (interaction, index) =>
+          `${index + 1}. ${interaction.aiActionDescription}`
+      )
+      .filter((step) => step)
+      .join("\n");
 
-    // Add headers if this is a new spreadsheet
-    const values = needsHeaders ? [headers, ...rows] : rows;
+    const expectedResults = enhancedInteractions
+      .map(
+        (interaction) =>
+          interaction.expectedResult || "Action should complete successfully"
+      )
+      .join("\n");
 
-    // Determine where to append data
-    let range = needsHeaders ? "Interactions!A1" : "Interactions!A:H";
+    const actualResults = enhancedInteractions
+      .map(
+        (interaction) => interaction.aiActualResult || "Action was completed"
+      )
+      .join("\n");
 
-    // If using an existing spreadsheet, find the next empty row
+    const formatTesterName = (name) => {
+      if (!name) return "";
+      return name
+        .split(" ")
+        .map(
+          (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        )
+        .join(" ");
+    };
+
+    const consolidatedRow = [
+      testCaseName,
+      `${testCaseName}`,
+      testSteps,
+      "",
+      expectedResults,
+      actualResults,
+      "P1",
+      formatTesterName(recordingState.testerName),
+      "Pass",
+    ];
+
+    const values = needsHeaders
+      ? [headers, consolidatedRow]
+      : [consolidatedRow];
+
+    let range = needsHeaders ? "Interactions!A1" : "Interactions!A:I";
+
     if (recordingState.targetSpreadsheetId) {
       try {
         const nextRowResponse = await fetch(
@@ -653,63 +737,26 @@ async function saveToGoogleSheets(interactions) {
 
         if (nextRowResponse.ok) {
           const data = await nextRowResponse.json();
-          // If there's data, get the length (number of rows), otherwise start at row 1
           let nextRow =
             data.values && data.values[0] ? data.values[0].length + 1 : 1;
 
-          // If we're starting from row 1, we need to add headers
           if (nextRow === 1) {
             needsHeaders = true;
-            values.unshift(headers);
+            values[0] = headers;
           }
 
           range = `Interactions!A${nextRow}`;
         }
       } catch (error) {
         console.error("[Sheets] Error finding next empty row:", error);
-        // Fall back to appending
-        range = "Interactions!A:H";
-      }
-    }
-
-    // Handle existing test case IDs to ensure uniqueness
-    if (recordingState.targetSpreadsheetId) {
-      try {
-        // Check for existing test case IDs
-        const testCaseResponse = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Interactions!A:A?majorDimension=COLUMNS`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        if (testCaseResponse.ok) {
-          const data = await testCaseResponse.json();
-          if (data.values && data.values[0]) {
-            // If our testCaseId already exists, generate a new one
-            if (data.values[0].includes(testCaseId)) {
-              // Generate a truly unique one by adding a random suffix
-              const uniqueTestCaseId = `TC${String(Date.now()).substr(
-                -6
-              )}_${Math.floor(Math.random() * 1000)}`;
-              // Update all rows with the new ID
-              rows.forEach((row) => (row[0] = uniqueTestCaseId));
-            }
-          }
-        }
-      } catch (error) {
-        console.error("[Sheets] Error checking existing test case IDs:", error);
+        range = "Interactions!A:I";
       }
     }
 
     const response = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`,
       {
-        method: "POST",
+        method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -721,75 +768,15 @@ async function saveToGoogleSheets(interactions) {
     );
 
     if (!response.ok) {
-      // If token is expired, try refreshing it
-      if (response.status === 401) {
-        console.log("Token expired during data saving, refreshing...");
-
-        // Revoke the current token
-        await new Promise((resolve, reject) => {
-          chrome.identity.removeCachedAuthToken({ token }, () => {
-            if (chrome.runtime.lastError) {
-              reject(chrome.runtime.lastError);
-            } else {
-              resolve();
-            }
-          });
-        });
-
-        // Get a new token with the getToken Promise wrapper
-        const getToken = (interactive) => {
-          return new Promise((resolve, reject) => {
-            chrome.identity.getAuthToken(
-              {
-                interactive: interactive,
-                scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-              },
-              (token) => {
-                if (chrome.runtime.lastError) {
-                  reject(chrome.runtime.lastError);
-                } else {
-                  resolve(token);
-                }
-              }
-            );
-          });
-        };
-
-        const newToken = await getToken(true);
-
-        // Retry with new token
-        const retryResponse = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${newToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              values: values,
-            }),
-          }
-        );
-
-        if (!retryResponse.ok) {
-          const retryError = await retryResponse.text();
-          throw new Error(
-            `Failed to save data after token refresh: ${retryError}`
-          );
-        }
-
-        console.log(
-          "Data saved to spreadsheet successfully after token refresh"
-        );
-        return;
-      }
-
-      const error = await response.text();
-      throw new Error(`Failed to save to spreadsheet: ${error}`);
+      const errorText = await response.text();
+      console.error("[Sheets] Error writing data:", errorText);
+      throw new Error(`Error writing data to spreadsheet: ${errorText}`);
     }
 
-    console.log("Data saved to spreadsheet successfully");
+    await autoResizeColumns(token, spreadsheetId);
+
+    console.log("[Sheets] Successfully saved interactions to spreadsheet");
+    return spreadsheetUrl;
   } catch (error) {
     console.error("[Sheets] Error in saveToGoogleSheets:", error);
     throw error;
@@ -799,7 +786,6 @@ async function saveToGoogleSheets(interactions) {
 async function formatSpreadsheet(spreadsheetId, token) {
   console.log("Formatting spreadsheet headers:", spreadsheetId);
   try {
-    // First, get the spreadsheet to find the actual first sheet ID
     const getResponse = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`,
       {
@@ -814,13 +800,11 @@ async function formatSpreadsheet(spreadsheetId, token) {
     if (!getResponse.ok) {
       const getError = await getResponse.text();
       console.error("[Sheets] Error getting spreadsheet info:", getError);
-      // Continue without formatting rather than failing completely
       return;
     }
 
     const spreadsheetData = await getResponse.json();
 
-    // Check if we have sheets and get the first sheet's ID
     if (!spreadsheetData.sheets || spreadsheetData.sheets.length === 0) {
       console.error("[Sheets] No sheets found in the spreadsheet");
       return;
@@ -829,7 +813,6 @@ async function formatSpreadsheet(spreadsheetId, token) {
     const firstSheetId = spreadsheetData.sheets[0].properties.sheetId;
     console.log("[Sheets] Using sheet ID:", firstSheetId);
 
-    // Add bold formatting to the header row
     const response = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
       {
@@ -847,21 +830,174 @@ async function formatSpreadsheet(spreadsheetId, token) {
                   startRowIndex: 0,
                   endRowIndex: 1,
                   startColumnIndex: 0,
-                  endColumnIndex: 8, // 8 columns (A-H)
+                  endColumnIndex: 9,
                 },
                 cell: {
                   userEnteredFormat: {
+                    backgroundColor: {
+                      red: 0.82,
+                      green: 0.88,
+                      blue: 0.98,
+                    },
                     textFormat: {
                       bold: true,
+                      foregroundColor: {
+                        red: 0.0,
+                        green: 0.0,
+                        blue: 0.0,
+                      },
+                      fontSize: 11,
                     },
-                    backgroundColor: {
-                      red: 0.9,
-                      green: 0.9,
-                      blue: 0.9,
+                    horizontalAlignment: "CENTER",
+                    verticalAlignment: "MIDDLE",
+                    padding: {
+                      top: 5,
+                      right: 5,
+                      bottom: 5,
+                      left: 5,
                     },
                   },
                 },
-                fields: "userEnteredFormat(textFormat,backgroundColor)",
+                fields:
+                  "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,padding)",
+              },
+            },
+
+            {
+              repeatCell: {
+                range: {
+                  sheetId: firstSheetId,
+                  startRowIndex: 0,
+                  startColumnIndex: 0,
+                  endColumnIndex: 9,
+                },
+                cell: {
+                  userEnteredFormat: {
+                    wrapStrategy: "WRAP",
+                  },
+                },
+                fields: "userEnteredFormat.wrapStrategy",
+              },
+            },
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1,
+                      startColumnIndex: 6,
+                      endColumnIndex: 7,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "P1",
+                        },
+                      ],
+                    },
+                    format: {
+                      textFormat: {
+                        foregroundColor: {
+                          red: 0.8,
+                          green: 0.0,
+                          blue: 0.0,
+                        },
+                        bold: true,
+                      },
+                      backgroundColor: {
+                        red: 1.0,
+                        green: 0.9,
+                        blue: 0.9,
+                      },
+                    },
+                  },
+                },
+                index: 0,
+              },
+            },
+
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1,
+                      startColumnIndex: 6,
+                      endColumnIndex: 7,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "P2",
+                        },
+                      ],
+                    },
+                    format: {
+                      textFormat: {
+                        foregroundColor: {
+                          red: 0.85,
+                          green: 0.5,
+                          blue: 0.0,
+                        },
+                        bold: true,
+                      },
+                      backgroundColor: {
+                        red: 1.0,
+                        green: 0.95,
+                        blue: 0.8,
+                      },
+                    },
+                  },
+                },
+                index: 1,
+              },
+            },
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1,
+                      startColumnIndex: 6,
+                      endColumnIndex: 7,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "P3",
+                        },
+                      ],
+                    },
+                    format: {
+                      textFormat: {
+                        foregroundColor: {
+                          red: 0.85,
+                          green: 0.7,
+                          blue: 0.0,
+                        },
+                        bold: true,
+                      },
+                      backgroundColor: {
+                        red: 1.0,
+                        green: 1.0,
+                        blue: 0.8,
+                      },
+                    },
+                  },
+                },
+                index: 2,
               },
             },
             {
@@ -875,6 +1011,159 @@ async function formatSpreadsheet(spreadsheetId, token) {
                 fields: "gridProperties.frozenRowCount",
               },
             },
+            {
+              autoResizeDimensions: {
+                dimensions: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 0,
+                  endIndex: 9,
+                },
+              },
+            },
+            {
+              updateDimensionProperties: {
+                range: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 1,
+                  endIndex: 2,
+                },
+                properties: {
+                  pixelSize: 150,
+                },
+                fields: "pixelSize",
+              },
+            },
+            {
+              updateDimensionProperties: {
+                range: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 2,
+                  endIndex: 3,
+                },
+                properties: {
+                  pixelSize: 200,
+                },
+                fields: "pixelSize",
+              },
+            },
+            {
+              updateDimensionProperties: {
+                range: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 4,
+                  endIndex: 5,
+                },
+                properties: {
+                  pixelSize: 250,
+                },
+                fields: "pixelSize",
+              },
+            },
+            {
+              setDataValidation: {
+                range: {
+                  sheetId: firstSheetId,
+                  startRowIndex: 1,
+                  startColumnIndex: 8,
+                  endColumnIndex: 9,
+                },
+                rule: {
+                  condition: {
+                    type: "ONE_OF_LIST",
+                    values: [
+                      { userEnteredValue: "Pass" },
+                      { userEnteredValue: "Fail" },
+                    ],
+                  },
+                  strict: true,
+                  showCustomUi: true,
+                },
+              },
+            },
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1,
+                      startColumnIndex: 8,
+                      endColumnIndex: 9,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "Pass",
+                        },
+                      ],
+                    },
+                    format: {
+                      backgroundColor: {
+                        red: 0.85,
+                        green: 0.95,
+                        blue: 0.85,
+                      },
+                      textFormat: {
+                        bold: true,
+                        foregroundColor: {
+                          red: 0.1,
+                          green: 0.1,
+                          blue: 0.1,
+                        },
+                      },
+                    },
+                  },
+                },
+                index: 3,
+              },
+            },
+            {
+              addConditionalFormatRule: {
+                rule: {
+                  ranges: [
+                    {
+                      sheetId: firstSheetId,
+                      startRowIndex: 1,
+                      startColumnIndex: 8,
+                      endColumnIndex: 9,
+                    },
+                  ],
+                  booleanRule: {
+                    condition: {
+                      type: "TEXT_EQ",
+                      values: [
+                        {
+                          userEnteredValue: "Fail",
+                        },
+                      ],
+                    },
+                    format: {
+                      backgroundColor: {
+                        red: 0.92,
+                        green: 0.75,
+                        blue: 0.8,
+                      },
+                      textFormat: {
+                        bold: true,
+                        foregroundColor: {
+                          red: 0.8,
+                          green: 0.0,
+                          blue: 0.0,
+                        },
+                      },
+                    },
+                  },
+                },
+                index: 4,
+              },
+            },
           ],
         }),
       }
@@ -885,9 +1174,166 @@ async function formatSpreadsheet(spreadsheetId, token) {
       throw new Error(`Failed to format spreadsheet: ${error}`);
     }
 
-    console.log("Spreadsheet headers formatted successfully");
+    console.log("Spreadsheet formatted successfully with updated styling");
   } catch (error) {
     console.error("[Sheets] Error formatting spreadsheet:", error);
-    // Don't rethrow the error - treat formatting errors as non-fatal
+  }
+}
+
+async function autoResizeColumns(token, spreadsheetId) {
+  try {
+    const getResponse = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!getResponse.ok) {
+      const getError = await getResponse.text();
+      console.error("[Sheets] Error getting spreadsheet info:", getError);
+      return;
+    }
+
+    const spreadsheetData = await getResponse.json();
+
+    if (!spreadsheetData.sheets || spreadsheetData.sheets.length === 0) {
+      console.error("[Sheets] No sheets found in the spreadsheet");
+      return;
+    }
+
+    const firstSheetId = spreadsheetData.sheets[0].properties.sheetId;
+
+    const response = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          requests: [
+            {
+              autoResizeDimensions: {
+                dimensions: {
+                  sheetId: firstSheetId,
+                  dimension: "COLUMNS",
+                  startIndex: 0,
+                  endIndex: 9,
+                },
+              },
+            },
+          ],
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to auto-resize columns: ${error}`);
+    }
+
+    console.log("[Sheets] Columns auto-resized successfully");
+  } catch (error) {
+    console.error("[Sheets] Error auto-resizing columns:", error);
+  }
+}
+
+function formatTestStep(interaction, stepNumber) {
+  if (!interaction) return null;
+
+  switch (interaction.type) {
+    case "navigation":
+      let url = interaction.toUrl || interaction.url || "";
+      // Ensure URL is secure (starts with https://)
+      if (url && !url.startsWith("https://")) {
+        url = url.replace(/^http:\/\//, "https://");
+        if (!url.startsWith("https://")) {
+          url = "https://" + url.replace(/^[^:]+:\/\//, "");
+        }
+      }
+
+      if (stepNumber === 1) {
+        return `${stepNumber}. Go to ${url}`;
+      } else {
+        return `${stepNumber}. Navigate to ${url}`;
+      }
+
+    case "click":
+      let clickDescription =
+        interaction.description ||
+        `Click on ${interaction.element.tagName.toLowerCase()}`;
+
+      if (clickDescription.startsWith("Click on ")) {
+        clickDescription = clickDescription.replace(
+          "Click on the ",
+          "Click on "
+        );
+      }
+
+      if (
+        interaction.element.tagName === "BUTTON" ||
+        interaction.element.type === "submit" ||
+        interaction.element.type === "button"
+      ) {
+        const buttonText =
+          interaction.element.innerText ||
+          interaction.element.value ||
+          (clickDescription.match(/Click on ['"](.+?)['"]/)
+            ? clickDescription.match(/Click on ['"](.+?)['"]/)[1]
+            : null);
+
+        if (buttonText) {
+          return `${stepNumber}. Click on '${buttonText}' button`;
+        }
+      }
+
+      return `${stepNumber}. ${clickDescription}`;
+
+    case "input":
+      let fieldName = "input field";
+      let inputValue = interaction.inputValue || "";
+
+      const inputMatch = interaction.description.match(/Enter (.+) in (.+)/);
+      if (inputMatch && inputMatch.length >= 3) {
+        inputValue = inputMatch[1];
+        fieldName = inputMatch[2].replace(/^the /, "");
+      }
+
+      if (
+        interaction.element.isMobileField ||
+        interaction.element.type === "tel" ||
+        fieldName.toLowerCase().includes("mobile") ||
+        fieldName.toLowerCase().includes("phone")
+      ) {
+        return `${stepNumber}. Enter ${inputValue} in Mobile Number field`;
+      }
+
+      if (interaction.element.type === "password") {
+        return `${stepNumber}. Enter password in Password field`;
+      }
+
+      if (interaction.element.type === "email") {
+        return `${stepNumber}. Enter ${inputValue} in Email field`;
+      }
+
+      if (
+        fieldName.toLowerCase().includes("otp") ||
+        interaction.element.id?.toLowerCase().includes("otp") ||
+        interaction.element.name?.toLowerCase().includes("otp") ||
+        interaction.element.placeholder?.toLowerCase().includes("otp")
+      ) {
+        return `${stepNumber}. Enter ${inputValue} in OTP field`;
+      }
+
+      return `${stepNumber}. Enter ${inputValue} in ${fieldName}`;
+
+    default:
+      return `${stepNumber}. ${interaction.description || interaction.type}`;
   }
 }

@@ -6,12 +6,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const spreadsheetUrlInput = document.getElementById("spreadsheetUrl");
   const statusDiv = document.getElementById("status");
 
-  // AI Configuration elements
-  const aiEnabledCheckbox = document.getElementById("aiEnabled");
-  const aiSettingsDiv = document.getElementById("aiSettings");
-  const backendUrlInput = document.getElementById("backendUrl");
+  const aiSettingsDiv = document.querySelector(".ai-config");
+  const testerNameInput = document.getElementById("testerName");
 
-  // Explicit debugging of initial element states
   console.log("Initial DOM elements:", {
     startButton: startButton ? "found" : "missing",
     stopButton: stopButton ? "found" : "missing",
@@ -19,7 +16,6 @@ document.addEventListener("DOMContentLoaded", () => {
     stopButtonClass: stopButton ? stopButton.className : "N/A",
   });
 
-  // Initial button states - ensure stop button is disabled on load
   stopButton.disabled = true;
   stopButton.classList.add("disabled-button");
   console.log(
@@ -27,43 +23,22 @@ document.addEventListener("DOMContentLoaded", () => {
     stopButton.disabled
   );
 
-  // Load saved AI settings or use defaults
-  chrome.storage.sync.get(["aiEnabled", "backendUrl"], (result) => {
-    // Default to enabled if not set
-    const isEnabled = result.aiEnabled !== undefined ? result.aiEnabled : true;
-
-    if (result.backendUrl) {
-      backendUrlInput.value = result.backendUrl;
-    } else {
-      backendUrlInput.value = "http://localhost:5000";
+  chrome.storage.sync.get(["testerName"], (result) => {
+    if (result.testerName) {
+      testerNameInput.value = result.testerName;
     }
-
-    aiEnabledCheckbox.checked = isEnabled;
-    aiSettingsDiv.classList.toggle("hidden", !isEnabled);
   });
 
-  // Toggle AI settings visibility when checkbox changes
-  aiEnabledCheckbox.addEventListener("change", () => {
-    const isEnabled = aiEnabledCheckbox.checked;
-    aiSettingsDiv.classList.toggle("hidden", !isEnabled);
-
-    // Save setting to storage
-    chrome.storage.sync.set({ aiEnabled: isEnabled });
+  testerNameInput.addEventListener("change", () => {
+    chrome.storage.sync.set({ testerName: testerNameInput.value });
   });
 
-  // Save backend URL when it changes
-  backendUrlInput.addEventListener("change", () => {
-    chrome.storage.sync.set({ backendUrl: backendUrlInput.value });
-  });
-
-  // Function to set recording UI state
   function setRecordingState(isRecording) {
     if (isRecording) {
       startButton.textContent = "Recording...";
       startButton.disabled = true;
       startButton.classList.add("recording");
 
-      // Make sure stop button is enabled
       stopButton.disabled = false;
       stopButton.classList.remove("disabled-button");
       console.log(
@@ -72,14 +47,12 @@ document.addEventListener("DOMContentLoaded", () => {
       );
 
       spreadsheetUrlInput.disabled = true;
-      aiEnabledCheckbox.disabled = true;
-      backendUrlInput.disabled = true;
+      testerNameInput.disabled = true;
     } else {
       startButton.textContent = "Start Recording";
       startButton.disabled = false;
       startButton.classList.remove("recording");
 
-      // Make sure stop button is disabled
       stopButton.disabled = true;
       stopButton.classList.add("disabled-button");
       console.log(
@@ -88,24 +61,20 @@ document.addEventListener("DOMContentLoaded", () => {
       );
 
       spreadsheetUrlInput.disabled = false;
-      aiEnabledCheckbox.disabled = false;
-      backendUrlInput.disabled = false;
+      testerNameInput.disabled = false;
     }
   }
 
-  // Function to update status
   function updateStatus(message, isError = false) {
     statusDiv.textContent = message;
     statusDiv.className = isError ? "error" : "success";
     console.log(`Status: ${message}`);
   }
 
-  // Function to extract spreadsheet ID from URL
   function extractSpreadsheetId(url) {
     if (!url) return null;
 
     try {
-      // For URLs like https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit
       const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
       return match ? match[1] : null;
     } catch (error) {
@@ -114,7 +83,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Function to validate spreadsheet URL
   function validateSpreadsheetUrl(url) {
     if (!url) return true; // Empty URL is valid (will create new sheet)
 
@@ -126,7 +94,6 @@ document.addEventListener("DOMContentLoaded", () => {
     return true;
   }
 
-  // Function to inject content script
   async function injectContentScript(tabId) {
     try {
       await chrome.scripting.executeScript({
@@ -140,7 +107,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Function to send message with retry
   async function sendMessageWithRetry(tabId, message, maxRetries = 2) {
     for (let i = 0; i <= maxRetries; i++) {
       try {
@@ -154,7 +120,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Function to send message to background script
   async function sendMessageToBackground(message) {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(message, (response) => {
@@ -168,7 +133,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Check current recording state when popup opens
   chrome.runtime.sendMessage({ action: "getRecordingState" }, (response) => {
     if (response && response.isRecording) {
       setRecordingState(true);
@@ -178,12 +142,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Force update the button states now
   setRecordingState(false);
 
   startButton.addEventListener("click", async () => {
     try {
-      // Validate spreadsheet URL if provided
       const spreadsheetUrl = spreadsheetUrlInput.value.trim();
       if (!validateSpreadsheetUrl(spreadsheetUrl)) {
         return;
@@ -201,16 +163,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       updateStatus("Starting recording...");
 
-      // Update UI immediately to provide feedback - VERY IMPORTANT FOR USER EXPERIENCE
       setRecordingState(true);
 
-      // Force enable the stop button
       stopButton.disabled = false;
       stopButton.classList.remove("disabled-button");
-      // First, ensure content script is injected
       await injectContentScript(tab.id);
 
-      // Then notify content script
       const contentResponse = await sendMessageWithRetry(tab.id, {
         action: "startRecording",
       });
@@ -219,10 +177,10 @@ document.addEventListener("DOMContentLoaded", () => {
         throw new Error("Failed to start recording in content script");
       }
 
-      // Finally, notify background script
       const bgResponse = await sendMessageToBackground({
         action: "startRecording",
         spreadsheetId: spreadsheetId,
+        testerName: testerNameInput.value,
       });
 
       if (!bgResponse || bgResponse.status !== "Recording started") {
@@ -231,13 +189,11 @@ document.addEventListener("DOMContentLoaded", () => {
         );
       }
 
-      // Double-check recording UI state is properly set
       setRecordingState(true);
       updateStatus("Recording in progress...");
     } catch (error) {
       console.error("Start recording error:", error);
       updateStatus(`Error: ${error.message}`, true);
-      // Reset buttons in case of error
       setRecordingState(false);
     }
   });
@@ -254,7 +210,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       updateStatus("Stopping recording...");
 
-      // First, notify content script
       const contentResponse = await sendMessageWithRetry(tab.id, {
         action: "stopRecording",
       });
@@ -263,7 +218,6 @@ document.addEventListener("DOMContentLoaded", () => {
         throw new Error("Failed to stop recording in content script");
       }
 
-      // Then notify background script
       const bgResponse = await sendMessageToBackground({
         action: "stopRecording",
       });
@@ -274,10 +228,8 @@ document.addEventListener("DOMContentLoaded", () => {
         );
       }
 
-      // Reset UI
       setRecordingState(false);
 
-      // Wait for the spreadsheet link
       const spreadsheetInfo = await sendMessageToBackground({
         action: "getSpreadsheetInfo",
       });
@@ -294,7 +246,6 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       console.error("Stop recording error:", error);
       updateStatus(`Error: ${error.message}`, true);
-      // Reset buttons in case of error
       setRecordingState(false);
     }
   });

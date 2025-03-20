@@ -16,22 +16,11 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Global variables for OpenAI client
-openai_client = None
 
 def initialize_client():
     """Initialize the Azure OpenAI client"""
-    global openai_client
     load_dotenv()
-    
-    if openai_client is None:
-        logger.info("Initializing Azure OpenAI client")
-        openai_client = AsyncAzureOpenAI(
-            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT")
-        )
-        logger.info("Azure OpenAI client initialized successfully")
+    logger.info("Azure OpenAI client initialized successfully")
 
 async def process_interactions(interactions):
     """Process user interactions with Azure OpenAI"""
@@ -97,6 +86,13 @@ async def process_interactions(interactions):
         """
 
         logger.info(f"Calling Azure OpenAI with deployment: {os.getenv('AZURE_OPENAI_DEPLOYMENT')}")
+        openai_client = AsyncAzureOpenAI(
+            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT")
+        )
+
         response = await openai_client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
             messages=[
@@ -180,10 +176,6 @@ def analyze_interactions():
         
         if not interactions:
             return jsonify({"error": "No interactions provided"}), 400
-        
-        # Initialize OpenAI client if needed
-        if openai_client is None:
-            initialize_client()
         
         # Process interactions
         loop = asyncio.new_event_loop()

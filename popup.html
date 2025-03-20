@@ -7,6 +7,11 @@
     <h1>AI Test Ease</h1>
 
     <div class="form-group">
+      <label for="testerName">Tester Name:</label>
+      <input type="text" id="testerName" placeholder="Your name" />
+    </div>
+
+    <div class="form-group">
       <label for="spreadsheetUrl">Existing Spreadsheet URL (optional):</label>
       <input
         type="text"
@@ -14,27 +19,6 @@
         placeholder="https://docs.google.com/spreadsheets/d/..."
       />
       <small>Leave blank to create a new spreadsheet</small>
-    </div>
-
-    <div class="ai-config">
-      <div class="ai-toggle">
-        <label for="aiEnabled">
-          <input type="checkbox" id="aiEnabled" />
-          <span>Enable AI Analysis</span>
-        </label>
-      </div>
-
-      <div id="aiSettings" class="hidden">
-        <div class="form-group">
-          <label for="backendUrl">Backend API URL:</label>
-          <input
-            type="text"
-            id="backendUrl"
-            placeholder="http://localhost:5000"
-          />
-          <small>URL of your Python backend service</small>
-        </div>
-      </div>
     </div>
 
     <div class="button-group">

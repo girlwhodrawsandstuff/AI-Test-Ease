@@ -1,20 +1,48 @@
-// Check if the content script has already been initialized on this page
 if (typeof window.aiTestEaseInitialized === "undefined") {
-  // Mark as initialized to prevent duplicate initialization
   window.aiTestEaseInitialized = true;
 
-  // Create namespace for our extension state
   window.aiTestEaseState = {
     isRecording: false,
     interactions: [],
-    eventHandlers: {}, // Store event handlers so we can remove them later
+    eventHandlers: {},
+    lastUrl: window.location.href,
   };
 
   console.log(
     "AI Test Ease content script initialized - waiting for recording to start"
   );
 
-  // Event handler for clicks
+  chrome.runtime.sendMessage({ action: "getRecordingState" }, (response) => {
+    if (response && response.isRecording) {
+      console.log("Detected active recording session");
+
+      const pageLoadInteraction = {
+        type: "navigation",
+        timestamp: new Date().toISOString(),
+        fromUrl: "",
+        toUrl: window.location.href,
+        url: window.location.href,
+        pageTitle: document.title,
+        description: `Navigate to "${document.title || window.location.href}"`,
+        expectedResult: "Page should load successfully",
+        element: {
+          tagName: "PAGE",
+          xpath: "/html/body",
+          type: "navigation",
+        },
+      };
+
+      chrome.runtime.sendMessage(
+        { action: "storeInteractions", interactions: [pageLoadInteraction] },
+        (storeResponse) => {
+          console.log("Navigation event stored:", storeResponse);
+
+          startRecording();
+        }
+      );
+    }
+  });
+
   function handleClick(event) {
     try {
       const target = event.target;
@@ -28,7 +56,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
           className: target.className,
           innerText: target.innerText?.substring(0, 100),
           xpath: getXPath(target),
-          // Additional properties useful for test automation
           name: target.name || "",
           value: target.value || "",
           type: target.type || "",
@@ -37,55 +64,68 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
           testId: target.getAttribute("data-testid") || "",
         },
         url: window.location.href,
-        // Add page title which helps in documentation
         pageTitle: document.title,
-        // Add suggested step description
         description: `Click on ${
           target.innerText
             ? `"${target.innerText.substring(0, 30)}"`
             : target.tagName.toLowerCase()
         }`,
-        // Add suggested expected result
         expectedResult: "Element should respond to click action",
       };
 
       window.aiTestEaseState.interactions.push(interaction);
       console.log("Interaction recorded:", interaction.type);
+
+      chrome.runtime.sendMessage(
+        { action: "storeInteractions", interactions: [interaction] },
+        (response) => {
+          if (!response || response.status !== "success") {
+            console.error("Failed to store interaction:", response);
+          }
+        }
+      );
     } catch (error) {
       console.error("Error recording click:", error);
     }
   }
 
-  // Event handler for input focus
-  function handleFocus(event) {
-    if (event.target.tagName !== "INPUT") return;
+  function checkForNavigation() {
+    if (!window.aiTestEaseState.isRecording) return;
 
-    try {
-      const target = event.target;
-
+    const currentUrl = window.location.href;
+    if (currentUrl !== window.aiTestEaseState.lastUrl) {
       const interaction = {
-        type: "focus",
+        type: "navigation",
         timestamp: new Date().toISOString(),
+        fromUrl: window.aiTestEaseState.lastUrl,
+        toUrl: currentUrl,
+        url: currentUrl,
+        pageTitle: document.title,
+        description: `Navigate to "${document.title || currentUrl}"`,
+        expectedResult: "Page should load successfully",
         element: {
-          tagName: target.tagName,
-          id: target.id,
-          className: target.className,
-          placeholder: target.placeholder,
-          xpath: getXPath(target),
+          tagName: "PAGE",
+          xpath: "/html/body",
+          type: "navigation",
         },
-        url: window.location.href,
       };
 
       window.aiTestEaseState.interactions.push(interaction);
-      console.log("Interaction recorded:", interaction.type);
-    } catch (error) {
-      console.error("Error recording focus:", error);
+      window.aiTestEaseState.lastUrl = currentUrl;
+      console.log("Navigation recorded:", interaction.description);
+
+      chrome.runtime.sendMessage(
+        { action: "storeInteractions", interactions: [interaction] },
+        (response) => {
+          if (!response || response.status !== "success") {
+            console.error("Failed to store navigation:", response);
+          }
+        }
+      );
     }
   }
 
-  // Function to format interactions for test automation
   function formatInteractionsForTestAutomation(interactions) {
-    // Prepare the data specifically for test automation
     const headers = [
       "Step #",
       "Test Case ID",
@@ -100,13 +140,11 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       "Timestamp",
     ];
 
-    // Group interactions into test cases (each page/URL could be a separate test case)
     let testCaseId = 1;
     let currentUrl = "";
     let stepNumber = 1;
 
     const rows = interactions.map((interaction, index) => {
-      // If URL changes, consider it a new test case
       if (currentUrl !== interaction.url) {
         currentUrl = interaction.url;
         testCaseId++;
@@ -115,18 +153,21 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         stepNumber++;
       }
 
-      // Determine the best element identifier (prioritize ID, then name, etc.)
+      const element = interaction.element || {};
+
       let elementIdentifier = "";
-      if (interaction.element.id) {
-        elementIdentifier = `id=${interaction.element.id}`;
-      } else if (interaction.element.name) {
-        elementIdentifier = `name=${interaction.element.name}`;
-      } else if (interaction.element.testId) {
-        elementIdentifier = `data-testid=${interaction.element.testId}`;
-      } else if (interaction.element.className) {
-        elementIdentifier = `class=${interaction.element.className}`;
-      } else {
-        elementIdentifier = interaction.element.xpath;
+      if (element.id) {
+        elementIdentifier = `id=${element.id}`;
+      } else if (element.name) {
+        elementIdentifier = `name=${element.name}`;
+      } else if (element.testId) {
+        elementIdentifier = `data-testid=${element.testId}`;
+      } else if (element.className) {
+        elementIdentifier = `class=${element.className}`;
+      } else if (element.xpath) {
+        elementIdentifier = element.xpath;
+      } else if (interaction.type === "navigation") {
+        elementIdentifier = "URL";
       }
 
       return [
@@ -134,12 +175,13 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         `TC_${testCaseId}`,
         interaction.type,
         interaction.description ||
-          `${interaction.type} on ${interaction.element.tagName}`,
-        interaction.element.tagName,
+          `${interaction.type} on ${element.tagName || "page"}`,
+        element.tagName ||
+          (interaction.type === "navigation" ? "page" : "unknown"),
         elementIdentifier,
         interaction.expectedResult || "Action should complete successfully",
         interaction.url,
-        interaction.element.xpath,
+        element.xpath || "",
         interaction.pageTitle || "",
         interaction.timestamp,
       ];
@@ -148,29 +190,162 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     return { headers, rows };
   }
 
-  // Function to start recording (attach event listeners)
+  function handleInput(event) {
+    try {
+      const target = event.target;
+
+      if (!["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+
+      const inputId = target.id || target.name || getXPath(target);
+      const value = target.value;
+
+      const isPassword = target.type === "password";
+      const displayValue = isPassword ? "********" : value;
+
+      let fieldName = getElementDescription(target);
+
+      const isMobileField =
+        target.placeholder?.toLowerCase().includes("mobile") ||
+        target.placeholder?.toLowerCase().includes("phone") ||
+        target.id?.toLowerCase().includes("mobile") ||
+        target.id?.toLowerCase().includes("phone") ||
+        target.name?.toLowerCase().includes("mobile") ||
+        target.name?.toLowerCase().includes("phone") ||
+        target.type === "tel";
+
+      if (isMobileField) {
+        fieldName = "Mobile Number field";
+      }
+
+      fieldName = fieldName.replace("the ", "");
+
+      if (!window.aiTestEaseState.inputValues) {
+        window.aiTestEaseState.inputValues = {};
+      }
+      window.aiTestEaseState.inputValues[inputId] = displayValue;
+
+      if (!window.aiTestEaseState.inputFields) {
+        window.aiTestEaseState.inputFields = {};
+      }
+      window.aiTestEaseState.inputFields[inputId] = {
+        fieldName: fieldName,
+        isMobileField: isMobileField,
+        type: target.type || "",
+        placeholder: target.placeholder || "",
+        tagName: target.tagName,
+        xpath: getXPath(target),
+      };
+
+      if (
+        window.aiTestEaseState.inputFrames &&
+        window.aiTestEaseState.inputFrames[inputId]
+      ) {
+        cancelAnimationFrame(window.aiTestEaseState.inputFrames[inputId]);
+      }
+
+      if (!window.aiTestEaseState.inputFrames) {
+        window.aiTestEaseState.inputFrames = {};
+      }
+
+      window.aiTestEaseState.inputFrames[inputId] = requestAnimationFrame(
+        () => {
+          window.aiTestEaseState.inputFrames[inputId] = requestAnimationFrame(
+            () => {
+              const interaction = {
+                type: "input",
+                timestamp: new Date().toISOString(),
+                element: {
+                  tagName: target.tagName,
+                  id: target.id,
+                  className: target.className,
+                  placeholder: target.placeholder,
+                  name: target.name || "",
+                  type: target.type || "",
+                  xpath: getXPath(target),
+                  isMobileField: isMobileField,
+                },
+                inputValue: displayValue,
+                url: window.location.href,
+                pageTitle: document.title,
+                description: `Enter ${
+                  isPassword ? "password" : `"${displayValue}"`
+                } in ${fieldName}`,
+                expectedResult: "Input should be accepted",
+              };
+
+              window.aiTestEaseState.interactions =
+                window.aiTestEaseState.interactions.filter((item) => {
+                  if (item.type !== "input") return true;
+
+                  const itemInputId =
+                    item.element.id || item.element.name || item.element.xpath;
+                  return itemInputId !== inputId;
+                });
+
+              window.aiTestEaseState.interactions.push(interaction);
+              console.log("Input finalized:", interaction.description);
+
+              chrome.runtime.sendMessage(
+                { action: "storeInteractions", interactions: [interaction] },
+                (response) => {
+                  if (!response || response.status !== "success") {
+                    console.error("Failed to store finalized input:", response);
+                  }
+                }
+              );
+
+              delete window.aiTestEaseState.inputFrames[inputId];
+            }
+          );
+        }
+      );
+    } catch (error) {
+      console.error("Error recording input:", error);
+    }
+  }
+
   function startRecording() {
     console.log("Starting recording - attaching event listeners");
     window.aiTestEaseState.isRecording = true;
-    window.aiTestEaseState.interactions = [];
+    window.aiTestEaseState.lastUrl = window.location.href;
+    window.aiTestEaseState.inputFrames = {};
+    window.aiTestEaseState.inputValues = {};
 
-    // Attach event listeners and store references to them
     document.addEventListener("click", handleClick);
-    document.addEventListener("focus", handleFocus, true);
+    document.addEventListener("input", handleInput);
 
-    // Store references to the handlers
+    const observer = new MutationObserver(() => {
+      checkForNavigation();
+    });
+
+    observer.observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: false,
+    });
+
+    const navigationInterval = setInterval(checkForNavigation, 1000);
+
     window.aiTestEaseState.eventHandlers = {
       click: handleClick,
-      focus: handleFocus,
+      input: handleInput,
+      observer: observer,
+      navigationInterval: navigationInterval,
     };
   }
 
-  // Function to stop recording (remove event listeners)
   function stopRecording() {
     console.log("Stopping recording - removing event listeners");
     window.aiTestEaseState.isRecording = false;
 
-    // Remove event listeners
+    if (window.aiTestEaseState.inputFrames) {
+      Object.values(window.aiTestEaseState.inputFrames).forEach((frameId) => {
+        if (frameId) cancelAnimationFrame(frameId);
+      });
+    }
+    window.aiTestEaseState.inputFrames = {};
+    window.aiTestEaseState.inputValues = {};
+
     if (window.aiTestEaseState.eventHandlers.click) {
       document.removeEventListener(
         "click",
@@ -178,19 +353,24 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
       );
     }
 
-    if (window.aiTestEaseState.eventHandlers.focus) {
+    if (window.aiTestEaseState.eventHandlers.input) {
       document.removeEventListener(
-        "focus",
-        window.aiTestEaseState.eventHandlers.focus,
-        true
+        "input",
+        window.aiTestEaseState.eventHandlers.input
       );
     }
 
-    // Clear event handler references
+    if (window.aiTestEaseState.eventHandlers.observer) {
+      window.aiTestEaseState.eventHandlers.observer.disconnect();
+    }
+
+    if (window.aiTestEaseState.eventHandlers.navigationInterval) {
+      clearInterval(window.aiTestEaseState.eventHandlers.navigationInterval);
+    }
+
     window.aiTestEaseState.eventHandlers = {};
   }
 
-  // Listen for messages from popup/background
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       if (message.action === "startRecording") {
@@ -198,7 +378,6 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
         sendResponse({ status: "Recording started" });
       } else if (message.action === "stopRecording") {
         stopRecording();
-        // Send recorded interactions to background script
         chrome.runtime.sendMessage(
           {
             action: "saveInteractions",
@@ -208,9 +387,8 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
             sendResponse({ status: "Recording stopped" });
           }
         );
-        return true; // Will respond asynchronously
+        return true;
       } else if (message.action === "formatInteractions") {
-        // If we need to format interactions outside the extension
         const formatted = formatInteractionsForTestAutomation(
           message.interactions
         );
@@ -222,7 +400,39 @@ if (typeof window.aiTestEaseInitialized === "undefined") {
     }
   });
 
-  // Helper function to get XPath of an element
+  function getElementDescription(element) {
+    if (!element) return "unknown element";
+
+    if (element.placeholder) return element.placeholder;
+    if (element.name) return element.name;
+    if (element.id) return element.id;
+    if (element.ariaLabel || element.getAttribute("aria-label"))
+      return element.ariaLabel || element.getAttribute("aria-label");
+
+    if (
+      element.tagName === "SELECT" &&
+      element.options &&
+      element.selectedIndex >= 0
+    ) {
+      return `the ${element.options[element.selectedIndex].text} dropdown`;
+    }
+
+    const labels = document.querySelectorAll(`label[for="${element.id}"]`);
+    if (labels.length > 0) {
+      return labels[0].textContent.trim();
+    }
+
+    let parent = element.parentElement;
+    while (parent && parent.tagName !== "BODY") {
+      if (parent.tagName === "LABEL") {
+        return parent.textContent.trim();
+      }
+      parent = parent.parentElement;
+    }
+
+    return `the ${element.tagName.toLowerCase()} field`;
+  }
+
   function getXPath(element) {
     if (!element) return "";
 
