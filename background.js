@@ -79,27 +79,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const allInteractions = result.interactions || [];
 
       if (message.interactions && message.interactions.length > 0) {
-        chrome.storage.local.set(
-          {
-            interactions: [...allInteractions, ...message.interactions],
-          },
-          () => {
-            chrome.storage.local.get(["interactions"], (updatedResult) => {
-              const finalInteractions = updatedResult.interactions || [];
-              console.log("Saving all interactions:", finalInteractions.length);
-
-              saveToGoogleSheets(finalInteractions)
-                .then(() => {
-                  sendResponse({ status: "success", url: spreadsheetUrl });
-                  chrome.storage.local.remove("interactions");
-                })
-                .catch((error) => {
-                  console.error("Error saving interactions:", error);
-                  sendResponse({ status: "error", error: error.message });
-                });
-            });
-          }
-        );
+        saveToGoogleSheets(message.interactions)
+          .then(() => {
+            sendResponse({ status: "success", url: spreadsheetUrl });
+            chrome.storage.local.remove("interactions");
+          })
+          .catch((error) => {
+            console.error("Error saving interactions:", error);
+            sendResponse({ status: "error", error: error.message });
+          });
       } else {
         console.log(
           "No new interactions, using stored interactions:",
@@ -468,7 +456,8 @@ async function processInteractionsWithAI(interactions) {
     };
   }
 
-  const cleanedInteractions = interactions.map((interaction) => {
+  const cleanedInteractions = interactions.map((interaction, index) => {
+    console.log(`~~~Interaction ${index}: `, interaction);
     const cleanInteraction = { ...interaction };
 
     if (!cleanInteraction.url) {
