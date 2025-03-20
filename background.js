@@ -456,8 +456,7 @@ async function processInteractionsWithAI(interactions) {
     };
   }
 
-  const cleanedInteractions = interactions.map((interaction, index) => {
-    console.log(`~~~Interaction ${index}: `, interaction);
+  const cleanedInteractions = interactions.map((interaction) => {
     const cleanInteraction = { ...interaction };
 
     if (!cleanInteraction.url) {
@@ -526,8 +525,6 @@ async function processInteractionsWithAI(interactions) {
         body: JSON.stringify({ interactions: cleanedInteractions }),
         signal: controller.signal,
       });
-
-      console.log("~~~~OPENAI Response:", response);
 
       clearTimeout(timeoutId);
 
