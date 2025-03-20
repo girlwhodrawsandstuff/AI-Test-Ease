@@ -23,7 +23,6 @@ let recordingState = {
 };
 
 const AI_CONFIG = {
-  enabled: true,
   backendUrl: "http://localhost:5000",
 };
 
@@ -457,14 +456,6 @@ async function verifySpreadsheetAccess(spreadsheetId, token) {
 }
 
 async function processInteractionsWithAI(interactions) {
-  if (!AI_CONFIG.enabled) {
-    console.log("[AI] AI processing is disabled");
-    return {
-      interactions: interactions,
-      testCaseName: "User Interaction Test",
-    };
-  }
-
   if (
     !interactions ||
     !Array.isArray(interactions) ||
