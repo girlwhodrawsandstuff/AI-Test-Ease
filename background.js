@@ -649,18 +649,6 @@ function fallbackProcessing(interactions) {
   };
 }
 
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === "sync") {
-    if (changes.aiEnabled) {
-      AI_CONFIG.enabled = changes.aiEnabled.newValue;
-    }
-  }
-});
-
-chrome.storage.sync.get(["aiEnabled"], (result) => {
-  if (result.aiEnabled !== undefined) AI_CONFIG.enabled = result.aiEnabled;
-});
-
 async function saveToGoogleSheets(interactions) {
   console.log("Saving interactions:", interactions);
 

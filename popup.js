@@ -6,7 +6,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const spreadsheetUrlInput = document.getElementById("spreadsheetUrl");
   const statusDiv = document.getElementById("status");
 
-  const aiEnabledCheckbox = document.getElementById("aiEnabled");
   const aiSettingsDiv = document.querySelector(".ai-config");
   const testerNameInput = document.getElementById("testerName");
 
@@ -24,28 +23,10 @@ document.addEventListener("DOMContentLoaded", () => {
     stopButton.disabled
   );
 
-  chrome.storage.sync.get(["aiEnabled"], (result) => {
-    const isEnabled = result.aiEnabled !== undefined ? result.aiEnabled : true;
-
-    aiEnabledCheckbox.checked = isEnabled;
-    if (aiSettingsDiv) {
-      aiSettingsDiv.classList.toggle("hidden", !isEnabled);
-    }
-  });
-
   chrome.storage.sync.get(["testerName"], (result) => {
     if (result.testerName) {
       testerNameInput.value = result.testerName;
     }
-  });
-
-  aiEnabledCheckbox.addEventListener("change", () => {
-    const isEnabled = aiEnabledCheckbox.checked;
-    if (aiSettingsDiv) {
-      aiSettingsDiv.classList.toggle("hidden", !isEnabled);
-    }
-
-    chrome.storage.sync.set({ aiEnabled: isEnabled });
   });
 
   testerNameInput.addEventListener("change", () => {
@@ -66,7 +47,6 @@ document.addEventListener("DOMContentLoaded", () => {
       );
 
       spreadsheetUrlInput.disabled = true;
-      aiEnabledCheckbox.disabled = true;
       testerNameInput.disabled = true;
     } else {
       startButton.textContent = "Start Recording";
@@ -81,7 +61,6 @@ document.addEventListener("DOMContentLoaded", () => {
       );
 
       spreadsheetUrlInput.disabled = false;
-      aiEnabledCheckbox.disabled = false;
       testerNameInput.disabled = false;
     }
   }
