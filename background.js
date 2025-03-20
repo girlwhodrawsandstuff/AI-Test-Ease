@@ -547,6 +547,8 @@ async function processInteractionsWithAI(interactions) {
         signal: controller.signal,
       });
 
+      console.log("~~~~OPENAI Response:", response);
+
       clearTimeout(timeoutId);
 
       if (!response.ok) {
@@ -659,64 +661,6 @@ chrome.storage.sync.get(["aiEnabled"], (result) => {
   if (result.aiEnabled !== undefined) AI_CONFIG.enabled = result.aiEnabled;
 });
 
-function getTestCaseName(interactions) {
-  if (!interactions || interactions.length === 0) {
-    return "Untitled Test Case";
-  }
-
-  let firstPageTitle =
-    interactions[0]?.pageTitle ||
-    interactions[0]?.element?.tagName ||
-    "Unknown Page";
-
-  firstPageTitle = firstPageTitle.replace(/^https?:\/\/[^\/]+\//, "");
-  firstPageTitle = firstPageTitle.replace(/\.[^.]+$/, "");
-
-  if (interactions[0]?.type === "navigation" && interactions[0]?.toUrl) {
-    try {
-      const url = new URL(interactions[0].toUrl);
-      if (url.pathname !== "/" && url.pathname.length > 1) {
-        const pathSegments = url.pathname.split("/").filter(Boolean);
-        if (pathSegments.length > 0) {
-          const lastSegment = pathSegments[pathSegments.length - 1];
-          firstPageTitle = lastSegment
-            .replace(/[-_]/g, " ")
-            .replace(/\b\w/g, (c) => c.toUpperCase());
-        }
-      }
-    } catch (e) {
-      console.log("Error parsing URL for test case name:", e);
-    }
-  }
-
-  const significantActions = interactions.filter(
-    (i) =>
-      i.type === "click" &&
-      (i.element?.tagName === "BUTTON" ||
-        i.element?.type === "submit" ||
-        i.description?.toLowerCase().includes("submit") ||
-        i.description?.toLowerCase().includes("login") ||
-        i.description?.toLowerCase().includes("sign in"))
-  );
-
-  let actionName = "";
-  if (significantActions.length > 0) {
-    actionName =
-      significantActions[0].element?.innerText ||
-      significantActions[0].description?.replace(/^Click on /i, "") ||
-      "Action";
-
-    const actionWords = actionName.split(" ").slice(0, 3).join(" ");
-    actionName = actionWords || "Action";
-  }
-
-  if (actionName) {
-    return `${firstPageTitle} - ${actionName}`;
-  } else {
-    return `${firstPageTitle} Test`;
-  }
-}
-
 async function saveToGoogleSheets(interactions) {
   console.log("Saving interactions:", interactions);
 
@@ -732,9 +676,10 @@ async function saveToGoogleSheets(interactions) {
       );
     }
 
-    const enhancedInteractions = processInteractions(interactions);
+    const aiResult = await processInteractionsWithAI(interactions);
+    const enhancedInteractions = aiResult.interactions;
 
-    const testCaseName = getTestCaseName(enhancedInteractions);
+    const testCaseName = aiResult.testCaseName ?? "Fallback test name";
 
     console.log("[Sheets] Using test case name:", testCaseName);
 
@@ -1419,201 +1364,4 @@ function formatTestStep(interaction, stepNumber) {
     default:
       return `${stepNumber}. ${interaction.description || interaction.type}`;
   }
-}
-
-function processInteractions(interactions) {
-  const cleanedInteractions = interactions.map((interaction) => {
-    const cleanInteraction = { ...interaction };
-
-    if (!cleanInteraction.url) {
-      if (cleanInteraction.type === "navigation" && cleanInteraction.toUrl) {
-        cleanInteraction.url = cleanInteraction.toUrl;
-      } else {
-        cleanInteraction.url = "about:blank";
-      }
-    }
-
-    // Ensure URLs are secure
-    if (cleanInteraction.url && !cleanInteraction.url.startsWith("https://")) {
-      cleanInteraction.url = cleanInteraction.url.replace(
-        /^http:\/\//,
-        "https://"
-      );
-      if (!cleanInteraction.url.startsWith("https://")) {
-        cleanInteraction.url =
-          "https://" + cleanInteraction.url.replace(/^[^:]+:\/\//, "");
-      }
-    }
-
-    if (
-      cleanInteraction.toUrl &&
-      !cleanInteraction.toUrl.startsWith("https://")
-    ) {
-      cleanInteraction.toUrl = cleanInteraction.toUrl.replace(
-        /^http:\/\//,
-        "https://"
-      );
-      if (!cleanInteraction.toUrl.startsWith("https://")) {
-        cleanInteraction.toUrl =
-          "https://" + cleanInteraction.toUrl.replace(/^[^:]+:\/\//, "");
-      }
-    }
-
-    if (!cleanInteraction.element) {
-      cleanInteraction.element = {
-        tagName: interaction.type === "navigation" ? "PAGE" : "UNKNOWN",
-        xpath: "/html/body",
-        type: interaction.type,
-      };
-    }
-
-    return cleanInteraction;
-  });
-
-  let haveInitialNavigation = false;
-
-  const filteredInteractions = cleanedInteractions.filter(
-    (interaction, index, array) => {
-      if (interaction.type === "navigation") {
-        if (index === 0) {
-          haveInitialNavigation = true;
-          return true;
-        }
-
-        for (let i = 0; i < index; i++) {
-          const prevInteraction = array[i];
-          if (prevInteraction.type === "navigation") {
-            const currentUrl = (
-              interaction.toUrl ||
-              interaction.url ||
-              ""
-            ).split("#")[0];
-            const prevUrl = (
-              prevInteraction.toUrl ||
-              prevInteraction.url ||
-              ""
-            ).split("#")[0];
-
-            if (currentUrl === prevUrl) {
-              return false;
-            }
-          }
-        }
-      }
-
-      if (interaction.type === "click") {
-        for (let i = 0; i < index; i++) {
-          const prevInteraction = array[i];
-          if (
-            prevInteraction.type === "click" &&
-            prevInteraction.element.xpath === interaction.element.xpath &&
-            Math.abs(
-              new Date(prevInteraction.timestamp).getTime() -
-                new Date(interaction.timestamp).getTime()
-            ) < 5000
-          ) {
-            return false;
-          }
-        }
-      }
-
-      if (interaction.type === "input") {
-        for (let i = index + 1; i < array.length; i++) {
-          const laterInteraction = array[i];
-          if (
-            laterInteraction.type === "input" &&
-            laterInteraction.element.xpath === interaction.element.xpath
-          ) {
-            return false;
-          }
-        }
-      }
-
-      return true;
-    }
-  );
-
-  if (filteredInteractions.length > 0 && !haveInitialNavigation) {
-    const firstInteraction = filteredInteractions[0];
-    let startUrl = firstInteraction.url || "about:blank";
-
-    // Ensure the starting URL is secure
-    if (!startUrl.startsWith("https://")) {
-      startUrl = startUrl.replace(/^http:\/\//, "https://");
-      if (!startUrl.startsWith("https://")) {
-        startUrl = "https://" + startUrl.replace(/^[^:]+:\/\//, "");
-      }
-    }
-
-    const startingNavigation = {
-      type: "navigation",
-      timestamp: new Date(
-        new Date(firstInteraction.timestamp).getTime() - 1000
-      ).toISOString(),
-      fromUrl: "",
-      toUrl: startUrl,
-      url: startUrl,
-      pageTitle: firstInteraction.pageTitle || "Starting Page",
-      description: `Go to ${startUrl}`,
-      expectedResult: "Page should be loaded",
-      element: {
-        tagName: "PAGE",
-        xpath: "/html/body",
-        type: "navigation",
-      },
-    };
-
-    filteredInteractions.unshift(startingNavigation);
-  }
-
-  const enhancedInteractions = filteredInteractions.map(
-    (interaction, index, array) => {
-      let enhancedInteraction = { ...interaction };
-
-      if (interaction.type === "click") {
-        if (index < array.length - 1 && array[index + 1].type === "input") {
-          const nextInput = array[index + 1];
-          enhancedInteraction.isFieldClick = true;
-          enhancedInteraction.followedByInput = true;
-          enhancedInteraction.inputFieldType = nextInput.element.type || "";
-        }
-
-        if (
-          (interaction.element.tagName === "BUTTON" ||
-            interaction.element.type === "submit") &&
-          index > 0 &&
-          array.slice(0, index).some((item) => item.type === "input")
-        ) {
-          enhancedInteraction.isSubmitAfterInput = true;
-        }
-      }
-
-      if (interaction.type === "input") {
-        const fieldName =
-          interaction.description?.match(/Enter .+ in (.+)/)?.[1] || "";
-
-        if (
-          fieldName.toLowerCase().includes("mobile") ||
-          fieldName.toLowerCase().includes("phone") ||
-          interaction.element.type === "tel"
-        ) {
-          enhancedInteraction.specialFieldType = "mobile";
-        } else if (
-          fieldName.toLowerCase().includes("otp") ||
-          interaction.element.id?.toLowerCase().includes("otp") ||
-          interaction.element.name?.toLowerCase().includes("otp")
-        ) {
-          enhancedInteraction.specialFieldType = "otp";
-        } else if (interaction.element.type === "password") {
-          enhancedInteraction.specialFieldType = "password";
-        } else if (interaction.element.type === "email") {
-          enhancedInteraction.specialFieldType = "email";
-        }
-      }
-
-      return enhancedInteraction;
-    }
-  );
-
-  return enhancedInteractions;
 }
