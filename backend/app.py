@@ -29,7 +29,9 @@ async def process_interactions(interactions):
         formatted_interactions = []
         for interaction in interactions:
             description = f"{interaction['type']} on {interaction['element']['tagName']}"
-            if interaction['element'].get('innerText'):
+            if interaction.get('inputValue'):
+                description += f" with value \"{interaction['inputValue'][:30]}\""
+            elif interaction['element'].get('innerText'):
                 description += f" with text \"{interaction['element']['innerText'][:30]}\""
             elif interaction['element'].get('id'):
                 description += f" with id \"{interaction['element']['id']}\""
@@ -62,10 +64,16 @@ async def process_interactions(interactions):
         I have recorded the following user interactions on a website. Please analyze them and:
         1. Generate a meaningful name for this end-to-end test
         2. For each interaction, provide:
-           - A clear action description
+           - A clear action description with all the values entered by the user in input fields
            - An expected result
            - An actual result
            - A priority (P1, P2, or P3 based on importance)
+
+        IMPORTANT INSTRUCTION FOR INPUT FIELDS:
+        - For input fields, DO NOT list incremental typing. Only show the FINAL value that was typed.
+        - For example, if a user types "1", then "2", then "3", etc. to form "12345678910", your action description should only mention "12345678910" as the input, not each step.
+        - If multiple inputs are made in the same field, only describe the last/final value.
+        - Consolidate all typing in a single field into one step.
 
         Here are the interactions:
         {json.dumps(formatted_interactions, indent=2)}

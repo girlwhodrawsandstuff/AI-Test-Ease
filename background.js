@@ -20,6 +20,7 @@ let recordingState = {
   tabId: null,
   targetSpreadsheetId: null,
   testerName: "",
+  currentUrl: "no url provided",
 };
 
 const AI_CONFIG = {
@@ -38,6 +39,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (tabs && tabs[0]) {
           recordingState.isRecording = true;
           recordingState.tabId = tabs[0].id;
+          recordingState.currentUrl = tabs[0].url || "no url provided";
 
           if (message.spreadsheetId) {
             recordingState.targetSpreadsheetId = message.spreadsheetId;
@@ -59,6 +61,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     recordingState.isRecording = true;
     recordingState.tabId = sender.tab.id;
+    recordingState.currentUrl = sender.tab.url || "no url provided";
 
     if (message.spreadsheetId) {
       recordingState.targetSpreadsheetId = message.spreadsheetId;
@@ -673,13 +676,18 @@ async function saveToGoogleSheets(interactions) {
       "Status",
     ];
 
-    const testSteps = enhancedInteractions
+    const initialUrl = recordingState.currentUrl;
+    const navigationStep = `1. Navigate to ${initialUrl}`;
+
+    const otherSteps = enhancedInteractions
       .map(
         (interaction, index) =>
-          `${index + 1}. ${interaction.aiActionDescription}`
+          `${index + 2}. ${interaction.aiActionDescription}`
       )
       .filter((step) => step)
       .join("\n");
+
+    const testSteps = navigationStep + (otherSteps ? "\n" + otherSteps : "");
 
     const expectedResults = enhancedInteractions
       .map(
